@@ -116,9 +116,6 @@ opc  = 63bfa50ee6523365ff14c1f45f88737d
 k    = 00112233445566778899aabbccddeeff
 imsi = {imsi}
 imei = 353490069873{instance_id:03d}
-
-[expert]
-pregenerate_signals = true
 """
         config_path = f"srsue_{instance_id}.conf"
         with open(config_path, 'w') as f:
