@@ -327,9 +327,10 @@ imei = 353490069873001
         
         # 각 주파수별로 스캔
         # PLMN을 읽기 위해서는 충분한 시간이 필요함 (핸드폰처럼)
+        # 셀을 찾는 데 시간이 걸리고, PLMN을 읽는 데도 약 20초가 필요하므로 최소 60초 필요
         scan_time_per_freq = self.scan_duration // len(earfcns_to_scan) if len(earfcns_to_scan) > 1 else self.scan_duration
-        if scan_time_per_freq < 30:
-            scan_time_per_freq = 30  # 최소 30초 (PLMN 읽기 위해, 셀 찾기 + PLMN 읽기 시간 확보)
+        if scan_time_per_freq < 60:
+            scan_time_per_freq = 60  # 최소 60초 (셀 찾기 + PLMN 읽기 시간 확보)
         
         try:
             for idx, earfcn in enumerate(earfcns_to_scan):
@@ -405,6 +406,26 @@ imei = 353490069873001
                         pass
                     
                     if not line:
+                        # 셀을 찾았는데 PLMN을 아직 읽지 못했으면 추가 대기
+                        current_time = time.time()
+                        if last_cell_found_time > 0:
+                            time_since_cell = current_time - last_cell_found_time
+                            # 셀을 찾은 후 30초가 지나지 않았으면 계속 대기
+                            if time_since_cell < 30:
+                                # 해당 EARFCN의 eNB 중 PLMN이 없는 것이 있는지 확인
+                                has_unread_plmn = False
+                                for existing in self.detected_enbs:
+                                    if existing.get('earfcn') == earfcn:
+                                        existing_pci = existing.get('pci') or existing.get('cell_id')
+                                        if existing_pci and existing_pci > 2 and not existing.get('plmn'):
+                                            has_unread_plmn = True
+                                            break
+                                
+                                # PLMN을 읽지 못한 eNB가 있으면 계속 대기
+                                if has_unread_plmn:
+                                    time.sleep(0.5)  # PLMN 읽기를 위해 조금 더 긴 간격
+                                    continue
+                        
                         time.sleep(0.1)
                         continue
                 
@@ -735,31 +756,6 @@ imei = 353490069873001
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
         logger.info(f"결과가 {output_path}에 저장되었습니다.")
-        
-        # Flooding에 사용할 수 있는 명령어 출력
-        if self.detected_enbs:
-            print("\n" + "="*60)
-            print("Flooding에 사용할 수 있는 명령어:")
-            print("="*60)
-            for i, enb in enumerate(self.detected_enbs, 1):
-                plmn_str = enb.get('plmn', 'N/A')
-                pci_str = f"PCI={enb.get('pci', 'N/A')}" if 'pci' in enb else f"Cell ID={enb.get('cell_id', 'N/A')}"
-                print(f"\n[{i}] {plmn_str} ({pci_str}):")
-                
-                mcc = enb.get('mcc')
-                mnc = enb.get('mnc')
-                earfcn = enb.get('earfcn')
-                
-                cmd_parts = ["python3", "lte_flooding.py", "--usrp-args", f'"{self.usrp_args}"']
-                if mcc is not None:
-                    cmd_parts.extend(["--mcc", str(mcc)])
-                if mnc is not None:
-                    cmd_parts.extend(["--mnc", str(mnc)])
-                if earfcn is not None:
-                    cmd_parts.extend(["--earfcn", str(earfcn)])
-                
-                print(f"    {' '.join(cmd_parts)}")
-            print("="*60)
     
     def stop(self):
         """스캔 중지"""
@@ -809,11 +805,6 @@ def main():
         action="store_true",
         help="상세한 로그 출력"
     )
-    parser.add_argument(
-        "--interactive",
-        action="store_true",
-        help="스캔 완료 후 인터랙티브하게 eNB를 선택하여 flooding 시작"
-    )
     
     args = parser.parse_args()
     
@@ -839,60 +830,6 @@ def main():
     try:
         scanner.scan()
         scanner.save_results()
-        
-        # 인터랙티브 모드: eNB 선택 후 flooding 시작
-        if args.interactive and scanner.detected_enbs:
-            print("\n" + "="*60)
-            print("인터랙티브 모드: Flooding할 eNB를 선택하세요")
-            print("="*60)
-            
-            while True:
-                try:
-                    choice = input(f"\n선택할 eNB 번호 (1-{len(scanner.detected_enbs)}) 또는 'q'로 종료: ").strip()
-                    
-                    if choice.lower() == 'q':
-                        print("종료합니다.")
-                        break
-                    
-                    try:
-                        idx = int(choice) - 1
-                        if 0 <= idx < len(scanner.detected_enbs):
-                            selected_enb = scanner.detected_enbs[idx]
-                            print(f"\n선택된 eNB: PLMN={selected_enb.get('plmn')}, "
-                                  f"EARFCN={selected_enb.get('earfcn')}, "
-                                  f"Cell ID={selected_enb.get('cell_id')}")
-                            
-                            # Flooding 시작
-                            import subprocess as sp
-                            flooding_cmd = [
-                                "python3", "lte_flooding.py",
-                                "--usrp-args", args.usrp_args,
-                                "--mcc", str(selected_enb.get('mcc')),
-                                "--mnc", str(selected_enb.get('mnc')),
-                                "--earfcn", str(selected_enb.get('earfcn'))
-                            ]
-                            
-                            print(f"\nFlooding 시작 중...")
-                            print(f"명령어: {' '.join(flooding_cmd)}")
-                            print("Ctrl+C로 중지할 수 있습니다.\n")
-                            
-                            # Flooding 프로세스 실행
-                            flooding_process = sp.Popen(flooding_cmd)
-                            flooding_process.wait()
-                            
-                            break
-                        else:
-                            print(f"잘못된 번호입니다. 1-{len(scanner.detected_enbs)} 사이의 숫자를 입력하세요.")
-                    except ValueError:
-                        print("숫자를 입력하세요.")
-                except KeyboardInterrupt:
-                    print("\n\n사용자에 의해 중지됨")
-                    if 'flooding_process' in locals():
-                        flooding_process.terminate()
-                    break
-                except Exception as e:
-                    logger.error(f"오류 발생: {e}")
-                    break
         
     except Exception as e:
         logger.error(f"오류 발생: {e}")
