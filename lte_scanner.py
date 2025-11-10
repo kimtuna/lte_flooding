@@ -500,6 +500,49 @@ imei = 353490069873001
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+            
+            # 스캔 완료 후 로그 파일에서 최종 확인
+            if os.path.exists(log_file):
+                try:
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        log_content = f.read()
+                        # 로그에서 eNB 관련 정보 추출
+                        log_lines = log_content.split('\n')
+                        for log_line in log_lines:
+                            if any(kw in log_line.lower() for kw in ['found cell', 'found plmn', 'pci=', 'plmn']):
+                                # 로그 라인 파싱 시도
+                                enb_info = self.parse_srsue_output(log_line)
+                                if enb_info:
+                                    if 'earfcn' not in enb_info:
+                                        enb_info['earfcn'] = earfcn
+                                    
+                                    # 기존 eNB와 병합 확인
+                                    pci = enb_info.get('pci') or enb_info.get('cell_id')
+                                    plmn = enb_info.get('plmn')
+                                    
+                                    existing_enb = None
+                                    for existing in self.detected_enbs:
+                                        if existing.get('earfcn') == earfcn:
+                                            existing_pci = existing.get('pci') or existing.get('cell_id')
+                                            existing_plmn = existing.get('plmn')
+                                            if (pci and existing_pci and pci == existing_pci) or \
+                                               (plmn and existing_plmn and plmn == existing_plmn):
+                                                existing_enb = existing
+                                                break
+                                    
+                                    if existing_enb:
+                                        # 병합
+                                        for key, value in enb_info.items():
+                                            if value and (key not in existing_enb or existing_enb[key] == 'N/A' or existing_enb[key] is None):
+                                                existing_enb[key] = value
+                                    else:
+                                        # 새로 추가
+                                        enb_key = (pci, earfcn, plmn)
+                                        if enb_key not in seen_enbs:
+                                            seen_enbs.add(enb_key)
+                                            self.detected_enbs.append(enb_info)
+                except Exception as e:
+                    logger.debug(f"로그 파일 분석 중 오류: {e}")
                     
         except Exception as e:
             logger.error(f"EARFCN {earfcn} 스캔 중 오류: {e}")
