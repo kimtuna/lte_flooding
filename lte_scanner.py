@@ -77,40 +77,73 @@ imei = 353490069873001
     
     def parse_srsue_output(self, line: str) -> Optional[Dict]:
         """srsUE 출력에서 eNB 정보 파싱"""
+        if not line or not line.strip():
+            return None
+        
+        line_lower = line.lower()
+        
+        # eNB 발견 관련 키워드 확인
+        if not any(keyword in line_lower for keyword in ['cell', 'plmn', 'earfcn', 'found', 'detected', 'rsrp', 'rsrq']):
+            return None
+        
         enb_info = {}
         
-        # PLMN 정보 파싱
-        plmn_match = re.search(r'PLMN:\s*MCC=(\d+)\s*MNC=(\d+)', line)
-        if plmn_match:
+        # 다양한 PLMN 정보 형식 파싱
+        # 형식 1: PLMN: MCC=123 MNC=456
+        plmn_match = re.search(r'PLMN[:\s]*MCC[=:\s]*(\d+)[\s,]+MNC[=:\s]*(\d+)', line, re.IGNORECASE)
+        if not plmn_match:
+            # 형식 2: MCC: 123, MNC: 456
+            plmn_match = re.search(r'MCC[:\s]+(\d+).*?MNC[:\s]+(\d+)', line, re.IGNORECASE)
+        if not plmn_match:
+            # 형식 3: PLMN: 123456
+            plmn_match = re.search(r'PLMN[:\s]+(\d{5,6})', line, re.IGNORECASE)
+            if plmn_match:
+                plmn_str = plmn_match.group(1)
+                if len(plmn_str) == 5:
+                    enb_info['mcc'] = int(plmn_str[:3])
+                    enb_info['mnc'] = int(plmn_str[3:])
+                    enb_info['plmn'] = plmn_str
+                elif len(plmn_str) == 6:
+                    enb_info['mcc'] = int(plmn_str[:3])
+                    enb_info['mnc'] = int(plmn_str[3:])
+                    enb_info['plmn'] = plmn_str
+        
+        if plmn_match and 'mcc' not in enb_info:
             enb_info['mcc'] = int(plmn_match.group(1))
             enb_info['mnc'] = int(plmn_match.group(2))
             enb_info['plmn'] = f"{plmn_match.group(1)}{plmn_match.group(2)}"
         
-        # EARFCN 정보 파싱
-        earfcn_match = re.search(r'EARFCN[:\s]+(\d+)', line, re.IGNORECASE)
+        # EARFCN 정보 파싱 (다양한 형식)
+        earfcn_match = re.search(r'earfcn[:\s]+(\d+)', line, re.IGNORECASE)
+        if not earfcn_match:
+            earfcn_match = re.search(r'dl[_\s]?earfcn[:\s]+(\d+)', line, re.IGNORECASE)
         if earfcn_match:
             enb_info['earfcn'] = int(earfcn_match.group(1))
         
-        # Cell ID 파싱
-        cellid_match = re.search(r'Cell[_\s]?ID[:\s]+(\d+)', line, re.IGNORECASE)
+        # Cell ID 파싱 (다양한 형식)
+        cellid_match = re.search(r'cell[_\s]?id[:\s]+(\d+)', line, re.IGNORECASE)
+        if not cellid_match:
+            cellid_match = re.search(r'id[:\s]+(\d+)', line, re.IGNORECASE)
         if cellid_match:
             enb_info['cell_id'] = int(cellid_match.group(1))
         
-        # RSRP/RSRQ 파싱
-        rsrp_match = re.search(r'RSRP[:\s]+([-\d.]+)', line, re.IGNORECASE)
+        # RSRP 파싱
+        rsrp_match = re.search(r'rsrp[:\s]+([-\d.]+)', line, re.IGNORECASE)
         if rsrp_match:
             enb_info['rsrp'] = float(rsrp_match.group(1))
         
-        rsrq_match = re.search(r'RSRQ[:\s]+([-\d.]+)', line, re.IGNORECASE)
+        # RSRQ 파싱
+        rsrq_match = re.search(r'rsrq[:\s]+([-\d.]+)', line, re.IGNORECASE)
         if rsrq_match:
             enb_info['rsrq'] = float(rsrq_match.group(1))
         
         # Bandwidth 파싱
-        bw_match = re.search(r'BW[:\s]+(\d+)', line, re.IGNORECASE)
+        bw_match = re.search(r'(?:bw|bandwidth)[:\s]+(\d+)', line, re.IGNORECASE)
         if bw_match:
             enb_info['bandwidth'] = int(bw_match.group(1))
         
-        if enb_info:
+        # 최소한 Cell ID나 PLMN 정보가 있어야 유효한 eNB 정보로 간주
+        if enb_info and ('cell_id' in enb_info or 'plmn' in enb_info):
             enb_info['timestamp'] = datetime.now().isoformat()
             return enb_info
         
@@ -272,20 +305,42 @@ imei = 353490069873001
             
             logger.info("스캔 중... (Ctrl+C로 중지 가능)")
             
+            # 로그 파일도 모니터링
+            log_lines_read = 0
+            
             while self.running and (time.time() - start_time) < self.scan_duration:
                 if self.process.poll() is not None:
                     break
                 
+                # stdout에서 읽기
                 line = self.process.stdout.readline()
                 if not line:
-                    time.sleep(0.1)
+                    # 로그 파일에서도 읽기 시도
+                    try:
+                        if os.path.exists(log_file):
+                            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                log_lines = f.readlines()
+                                if len(log_lines) > log_lines_read:
+                                    for log_line in log_lines[log_lines_read:]:
+                                        line = log_line
+                                        log_lines_read = len(log_lines)
+                                        break
+                    except:
+                        pass
+                    
+                    if not line:
+                        time.sleep(0.1)
+                        continue
+                
+                line_stripped = line.strip()
+                if not line_stripped:
                     continue
                 
-                # 로그 출력 (verbose 모드는 main에서 설정됨)
-                line_stripped = line.strip()
-                if line_stripped:
-                    # 필요시 디버그 로그로 출력
-                    pass
+                # 디버그: eNB 관련 키워드가 있는 라인만 로깅
+                line_lower = line_stripped.lower()
+                if any(keyword in line_lower for keyword in ['cell', 'plmn', 'earfcn', 'found', 'detected', 'rsrp', 'rsrq', 'scan']):
+                    if logging.getLogger().level == logging.DEBUG:
+                        logger.debug(f"srsUE: {line_stripped}")
                 
                 # eNB 정보 파싱
                 enb_info = self.parse_srsue_output(line)
