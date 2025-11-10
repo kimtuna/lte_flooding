@@ -56,9 +56,11 @@ device_name = uhd
 device_args = {self.usrp_args}
 tx_gain = 80
 rx_gain = 40
+nof_antennas = 1
 
 [rat.eutra]
 {earfcn_line}
+nof_carriers = 1
 
 [usim]
 mode = soft
@@ -67,15 +69,6 @@ opc  = 63bfa50ee6523365ff14c1f45f88737d
 k    = 00112233445566778899aabbccddeeff
 imsi = 001010000000001
 imei = 353490069873001
-
-[mbms]
-service_id_list =
-
-[rf]
-nof_antennas = 1
-
-[rat.eutra]
-nof_carriers = 1
 
 [expert]
 pregenerate_signals = true

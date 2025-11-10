@@ -97,15 +97,18 @@ class LTEFlooder:
             # 둘 다 지정되지 않은 경우
             imsi = f"0010100000000{instance_id:03d}"
         
-        config_content = f"""[rf]
+           config_content = f"""[rf]
 device_name = uhd
 device_args = {self.usrp_args}
 tx_gain = 80
 rx_gain = 40
+nof_antennas = 1
 
 [rat.eutra]
 {earfcn_line}
 {mcc_mnc_section}
+nof_carriers = 1
+
 [usim]
 mode = soft
 algo = milenage
@@ -113,15 +116,6 @@ opc  = 63bfa50ee6523365ff14c1f45f88737d
 k    = 00112233445566778899aabbccddeeff
 imsi = {imsi}
 imei = 353490069873{instance_id:03d}
-
-[mbms]
-service_id_list =
-
-[rf]
-nof_antennas = 1
-
-[rat.eutra]
-nof_carriers = 1
 
 [expert]
 pregenerate_signals = true
