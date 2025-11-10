@@ -49,8 +49,4 @@ python3 lte_flooding.py --usrp-args "serial=YOUR_USRP_SERIAL" --mcc 123 --mnc 45
 - `--instances`: 동시 실행할 srsUE 인스턴스 수 (기본값: 10)
 - `--interval`: 연결 시도 간격(초) (기본값: 0.1)
 
-## 참고
 
-- **PLMN만으로 충분**: EARFCN과 PCI는 필요하지 않습니다. PLMN(MCC/MNC)만 지정하면 됩니다.
-- **자동 스캔**: EARFCN을 지정하지 않으면 srsUE가 자동으로 모든 주파수를 스캔하여 해당 PLMN의 eNB를 찾습니다.
-- **주파수 지정**: 주파수를 알고 있다면 `--earfcn` 옵션을 추가하여 더 빠르게 연결할 수 있습니다.
