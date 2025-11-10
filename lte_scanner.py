@@ -49,7 +49,9 @@ class LTEScanner:
         if self.earfcn is not None:
             earfcn_line = f"dl_earfcn = {self.earfcn}"
         else:
-            earfcn_line = "# dl_earfcn =  # 모든 주파수 스캔"
+            # 주파수를 지정하지 않으면 srsUE가 자동으로 모든 주파수를 스캔
+            # 주석 처리하면 srsUE가 자동 스캔 모드로 동작
+            earfcn_line = "# dl_earfcn =  # 자동 스캔 (모든 주파수)"
         
         config_content = f"""[rf]
 device_name = uhd
@@ -249,7 +251,7 @@ imei = 353490069873001
             "srsue",
             config_path,
             "--log.filename", log_file,
-            "--log.all_level", "info"
+            "--log.all_level", "debug"
         ]
         
         try:
@@ -338,9 +340,12 @@ imei = 353490069873001
                 
                 # 디버그: eNB 관련 키워드가 있는 라인만 로깅
                 line_lower = line_stripped.lower()
-                if any(keyword in line_lower for keyword in ['cell', 'plmn', 'earfcn', 'found', 'detected', 'rsrp', 'rsrq', 'scan']):
+                # 중요한 정보는 항상 출력 (verbose 모드가 아니어도)
+                if any(keyword in line_lower for keyword in ['found cell', 'detected cell', 'plmn', 'cell id', 'earfcn', 'rsrp', 'rsrq']):
+                    logger.info(f"[srsUE] {line_stripped}")
+                elif any(keyword in line_lower for keyword in ['cell', 'scan', 'search']):
                     if logging.getLogger().level == logging.DEBUG:
-                        logger.debug(f"srsUE: {line_stripped}")
+                        logger.debug(f"[srsUE] {line_stripped}")
                 
                 # eNB 정보 파싱
                 enb_info = self.parse_srsue_output(line)
@@ -366,6 +371,26 @@ imei = 353490069873001
                 except subprocess.TimeoutExpired:
                     self.process.kill()
                     self.process.wait()
+            
+            # 스캔 종료 후 로그 파일에서 최종 확인
+            logger.info("스캔 완료. 로그 파일에서 추가 정보 확인 중...")
+            if os.path.exists(log_file):
+                try:
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        log_content = f.read()
+                        # 로그에서 eNB 관련 정보 추출
+                        if 'cell' in log_content.lower() or 'plmn' in log_content.lower():
+                            logger.info("로그 파일에 eNB 관련 정보가 발견되었습니다.")
+                            # 마지막 몇 줄 출력
+                            log_lines = log_content.split('\n')
+                            relevant_lines = [l for l in log_lines if any(kw in l.lower() for kw in ['cell', 'plmn', 'earfcn', 'found', 'detected'])]
+                            if relevant_lines:
+                                logger.info("로그에서 발견된 관련 라인 (일부):")
+                                for line in relevant_lines[-10:]:  # 마지막 10줄
+                                    if line.strip():
+                                        logger.info(f"  {line.strip()}")
+                except Exception as e:
+                    logger.warning(f"로그 파일 읽기 오류: {e}")
             
         except KeyboardInterrupt:
             logger.info("\n스캔 중지됨")
