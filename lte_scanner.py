@@ -93,6 +93,10 @@ imei = 353490069873001
         line_lower = line.lower()
         
         # eNB 발견 관련 키워드 확인
+        # "Could not find Home PLMN" 같은 라인은 파싱하지 않음
+        if 'could not find' in line_lower or 'trying to connect' in line_lower:
+            return None
+        
         if not any(keyword in line_lower for keyword in ['cell', 'plmn', 'earfcn', 'found', 'detected', 'rsrp', 'rsrq', 'pci']):
             return None
         
@@ -189,10 +193,10 @@ imei = 353490069873001
             enb_info['earfcn'] = int(earfcn_match.group(1))
         
         # Cell ID 파싱 (다양한 형식)
+        # 주의: "Could not find Home PLMN Id=00101" 같은 라인에서 잘못 파싱하지 않도록
         if 'cell_id' not in enb_info:
+            # "Cell ID=" 형식만 파싱
             cellid_match = re.search(r'cell[_\s]?id[=:\s]+(\d+)', line, re.IGNORECASE)
-            if not cellid_match:
-                cellid_match = re.search(r'id[=:\s]+(\d+)', line, re.IGNORECASE)
             if cellid_match:
                 enb_info['cell_id'] = int(cellid_match.group(1))
         
@@ -422,20 +426,35 @@ imei = 353490069873001
                     if 'earfcn' not in enb_info:
                         enb_info['earfcn'] = earfcn
                     
-                    enb_key = (
-                        enb_info.get('mcc'),
-                        enb_info.get('mnc'),
-                        enb_info.get('cell_id'),
-                        enb_info.get('earfcn')
-                    )
+                    # 중복 제거: PCI + EARFCN 조합으로 고유성 판단
+                    # 같은 PCI와 EARFCN을 가진 eNB는 하나로 통합
+                    pci = enb_info.get('pci') or enb_info.get('cell_id')
+                    enb_key = (pci, enb_info.get('earfcn'))
                     
                     if enb_key not in seen_enbs:
                         seen_enbs.add(enb_key)
-                        self.detected_enbs.append(enb_info)
-                        logger.info(f"✓ eNB 탐지: PLMN={enb_info.get('plmn', 'N/A')}, "
-                                  f"EARFCN={enb_info.get('earfcn', 'N/A')}, "
-                                  f"Cell ID={enb_info.get('cell_id', 'N/A')}, "
-                                  f"RSRP={enb_info.get('rsrp', 'N/A')} dBm")
+                        
+                        # 기존 eNB 정보와 병합 (여러 라인에 걸친 정보 통합)
+                        existing_enb = None
+                        for existing in self.detected_enbs:
+                            existing_pci = existing.get('pci') or existing.get('cell_id')
+                            if (existing_pci, existing.get('earfcn')) == enb_key:
+                                existing_enb = existing
+                                break
+                        
+                        if existing_enb:
+                            # 기존 정보와 병합
+                            for key, value in enb_info.items():
+                                if key not in existing_enb or existing_enb[key] == 'N/A' or existing_enb[key] is None:
+                                    existing_enb[key] = value
+                        else:
+                            # 새로운 eNB 추가
+                            self.detected_enbs.append(enb_info)
+                            logger.info(f"✓ eNB 탐지: PLMN={enb_info.get('plmn', 'N/A')}, "
+                                      f"EARFCN={enb_info.get('earfcn', 'N/A')}, "
+                                      f"PCI={enb_info.get('pci', 'N/A')}, "
+                                      f"Cell ID={enb_info.get('cell_id', 'N/A')}, "
+                                      f"RSRP={enb_info.get('rsrp', 'N/A')} dBm")
             
             if process.poll() is None:
                 process.terminate()
@@ -468,16 +487,24 @@ imei = 353490069873001
         print("="*60)
         for i, enb in enumerate(self.detected_enbs, 1):
             print(f"\n[{i}] eNB 정보:")
-            print(f"  PLMN (MCC/MNC): {enb.get('plmn', 'N/A')} "
-                  f"({enb.get('mcc', 'N/A')}/{enb.get('mnc', 'N/A')})")
+            if enb.get('plmn'):
+                print(f"  PLMN (MCC/MNC): {enb.get('plmn', 'N/A')} "
+                      f"({enb.get('mcc', 'N/A')}/{enb.get('mnc', 'N/A')})")
+            else:
+                print(f"  PLMN (MCC/MNC): N/A")
             print(f"  EARFCN: {enb.get('earfcn', 'N/A')}")
-            print(f"  Cell ID: {enb.get('cell_id', 'N/A')}")
+            if 'pci' in enb:
+                print(f"  PCI: {enb.get('pci', 'N/A')}")
+            if 'cell_id' in enb and enb.get('cell_id') != enb.get('pci'):
+                print(f"  Cell ID: {enb.get('cell_id', 'N/A')}")
             if 'rsrp' in enb:
                 print(f"  RSRP: {enb['rsrp']} dBm")
             if 'rsrq' in enb:
                 print(f"  RSRQ: {enb['rsrq']} dB")
             if 'bandwidth' in enb:
                 print(f"  Bandwidth: {enb['bandwidth']} MHz")
+            if 'tac' in enb:
+                print(f"  TAC: {enb['tac']}")
             print(f"  탐지 시간: {enb.get('timestamp', 'N/A')}")
         print("="*60)
         print(f"\n총 {len(self.detected_enbs)}개의 eNB 탐지됨")
@@ -498,10 +525,23 @@ imei = 353490069873001
             print("Flooding에 사용할 수 있는 명령어:")
             print("="*60)
             for i, enb in enumerate(self.detected_enbs, 1):
-                print(f"\n[{i}] {enb.get('plmn', 'N/A')} (Cell ID: {enb.get('cell_id', 'N/A')}):")
-                print(f"    python3 lte_flooding.py --usrp-args \"{self.usrp_args}\" "
-                      f"--mcc {enb.get('mcc')} --mnc {enb.get('mnc')} "
-                      f"--earfcn {enb.get('earfcn')}")
+                plmn_str = enb.get('plmn', 'N/A')
+                pci_str = f"PCI={enb.get('pci', 'N/A')}" if 'pci' in enb else f"Cell ID={enb.get('cell_id', 'N/A')}"
+                print(f"\n[{i}] {plmn_str} ({pci_str}):")
+                
+                mcc = enb.get('mcc')
+                mnc = enb.get('mnc')
+                earfcn = enb.get('earfcn')
+                
+                cmd_parts = ["python3", "lte_flooding.py", "--usrp-args", f'"{self.usrp_args}"']
+                if mcc is not None:
+                    cmd_parts.extend(["--mcc", str(mcc)])
+                if mnc is not None:
+                    cmd_parts.extend(["--mnc", str(mnc)])
+                if earfcn is not None:
+                    cmd_parts.extend(["--earfcn", str(earfcn)])
+                
+                print(f"    {' '.join(cmd_parts)}")
             print("="*60)
     
     def stop(self):
