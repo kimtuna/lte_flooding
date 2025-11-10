@@ -143,9 +143,20 @@ pregenerate_signals = true
             serial_match = re.search(r'serial:\s*([^\s,]+)', result.stdout + result.stderr)
             if serial_match:
                 found_serial = serial_match.group(1)
-                # 사용자가 지정한 시리얼과 비교
-                if f"serial={found_serial}" in self.usrp_args or found_serial in self.usrp_args:
+                # 사용자가 지정한 시리얼 추출
+                user_serial_match = re.search(r'serial=([^\s"]+)', self.usrp_args)
+                user_serial = user_serial_match.group(1) if user_serial_match else None
+                
+                if user_serial and found_serial.upper() == user_serial.upper():
                     logger.info(f"✓ USRP 장치 연결 확인됨: serial={found_serial}")
+                    return True
+                elif user_serial:
+                    logger.warning(f"지정한 시리얼({user_serial})과 발견된 시리얼({found_serial})이 다릅니다")
+                    logger.info(f"발견된 장치 사용: serial={found_serial}")
+                    return True
+                else:
+                    # 시리얼이 지정되지 않았으면 첫 번째 장치 사용
+                    logger.info(f"✓ USRP 장치 발견: serial={found_serial}")
                     return True
             
             # srsUE로 직접 확인 시도
@@ -228,21 +239,39 @@ pregenerate_signals = true
                 bufsize=1
             )
             
-            # 초기 연결 확인 (3초 대기)
+            # 초기 연결 확인 (5초 대기하여 실제 연결 상태 확인)
             logger.info("USRP 장치 연결 확인 중...")
-            time.sleep(3)
+            time.sleep(5)
             
             if self.process.poll() is not None:
                 # 프로세스가 종료되었으면 오류
                 stdout, _ = self.process.communicate()
                 logger.error("✗ USRP 장치 연결 실패")
+                
+                # 오류 메시지 파싱
                 if stdout:
-                    error_lines = stdout.split('\n')[:5]
+                    error_lines = stdout.split('\n')
+                    found_error = False
                     for line in error_lines:
-                        if 'error' in line.lower() or 'fail' in line.lower():
-                            logger.error(f"  오류: {line.strip()}")
-                logger.error("  → USRP 장치가 연결되어 있는지 확인하세요")
-                logger.error("  → 시리얼 번호가 올바른지 확인하세요: uhd_find_devices")
+                        line_lower = line.lower()
+                        if any(keyword in line_lower for keyword in ['error', 'fail', 'cannot', 'unable', 'not found', 'no device']):
+                            if not found_error:
+                                logger.error("  상세 오류:")
+                                found_error = True
+                            logger.error(f"    {line.strip()}")
+                    
+                    # 오류가 명확하지 않으면 전체 출력의 일부 표시
+                    if not found_error and len(stdout) > 0:
+                        logger.error(f"  srsUE 출력 (일부):")
+                        for line in error_lines[:10]:
+                            if line.strip():
+                                logger.error(f"    {line.strip()}")
+                
+                logger.error("  → 해결 방법:")
+                logger.error("    1. USRP 장치가 USB에 제대로 연결되어 있는지 확인")
+                logger.error("    2. 시리얼 번호 확인: uhd_find_devices")
+                logger.error("    3. srsRAN이 올바르게 설치되었는지 확인: which srsue")
+                logger.error("    4. 권한 문제일 수 있음 (Linux: sudo 또는 udev 규칙 확인)")
                 return []
             
             logger.info("✓ USRP 장치 연결 성공!")
