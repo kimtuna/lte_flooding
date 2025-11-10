@@ -525,9 +525,12 @@ imei = 353490069873001
             # 프로세스 종료 전에 PLMN 정보를 읽을 시간을 더 줌
             # 셀을 찾은 후 PLMN을 읽는 데 시간이 필요함
             if process.poll() is None:
-                # 종료 전에 5초 더 대기하여 PLMN 정보를 읽을 기회 제공
-                logger.debug(f"EARFCN {earfcn}: PLMN 정보 읽기를 위해 추가 대기 중...")
-                time.sleep(5)
+                # 종료 전에 3초 더 대기하여 PLMN 정보를 읽을 기회 제공
+                # (너무 길면 전체 스캔 시간이 늘어남)
+                remaining_time = duration - (time.time() - start_time)
+                if remaining_time > 3:
+                    logger.debug(f"EARFCN {earfcn}: PLMN 정보 읽기를 위해 추가 대기 중...")
+                    time.sleep(3)
                 
                 process.terminate()
                 try:
