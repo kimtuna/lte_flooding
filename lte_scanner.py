@@ -566,9 +566,40 @@ imei = 353490069873001
     
     def save_results(self):
         """결과 저장"""
+        # 최종 병합: 같은 EARFCN에서 PLMN과 PCI 정보를 병합
+        merged_enbs = []
+        seen_keys = set()
+        
+        for enb in self.detected_enbs:
+            earfcn = enb.get('earfcn')
+            pci = enb.get('pci') or enb.get('cell_id')
+            plmn = enb.get('plmn')
+            
+            # 같은 EARFCN에서 이미 추가된 eNB와 병합 시도
+            merged = False
+            for merged_enb in merged_enbs:
+                if merged_enb.get('earfcn') == earfcn:
+                    merged_pci = merged_enb.get('pci') or merged_enb.get('cell_id')
+                    merged_plmn = merged_enb.get('plmn')
+                    
+                    # PCI가 같거나, PLMN이 같거나, 하나는 PLMN이 있고 다른 하나는 PCI가 있으면 병합
+                    if (pci and merged_pci and pci == merged_pci) or \
+                       (plmn and merged_plmn and plmn == merged_plmn) or \
+                       (plmn and not merged_plmn and pci and merged_pci and pci == merged_pci) or \
+                       (merged_plmn and not plmn and pci and merged_pci and pci == merged_pci):
+                        # 정보 병합
+                        for key, value in enb.items():
+                            if value and (key not in merged_enb or merged_enb[key] == 'N/A' or merged_enb[key] is None):
+                                merged_enb[key] = value
+                        merged = True
+                        break
+            
+            if not merged:
+                merged_enbs.append(enb)
+        
         # 노이즈 필터링: PLMN 정보가 없고 PCI가 0-2 범위인 eNB 제거
         filtered_enbs = []
-        for enb in self.detected_enbs:
+        for enb in merged_enbs:
             pci = enb.get('pci') or enb.get('cell_id')
             plmn = enb.get('plmn')
             
