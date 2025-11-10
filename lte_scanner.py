@@ -426,29 +426,66 @@ imei = 353490069873001
                     if 'earfcn' not in enb_info:
                         enb_info['earfcn'] = earfcn
                     
-                    # 중복 제거: PCI + EARFCN 조합으로 고유성 판단
-                    # 같은 PCI와 EARFCN을 가진 eNB는 하나로 통합
-                    pci = enb_info.get('pci') or enb_info.get('cell_id')
-                    enb_key = (pci, enb_info.get('earfcn'))
+                    # 같은 EARFCN에서 짧은 시간 내에 탐지된 eNB 정보 병합
+                    # (여러 라인에 걸쳐 정보가 나오는 경우)
+                    current_time = time.time()
+                    merge_window = 5  # 5초 이내에 탐지된 정보는 같은 eNB로 간주
                     
-                    if enb_key not in seen_enbs:
-                        seen_enbs.add(enb_key)
+                    # 기존 eNB 정보와 병합 시도
+                    existing_enb = None
+                    pci = enb_info.get('pci') or enb_info.get('cell_id')
+                    plmn = enb_info.get('plmn')
+                    
+                    for existing in self.detected_enbs:
+                        # 같은 EARFCN인지 확인
+                        if existing.get('earfcn') != enb_info.get('earfcn'):
+                            continue
                         
-                        # 기존 eNB 정보와 병합 (여러 라인에 걸친 정보 통합)
-                        existing_enb = None
-                        for existing in self.detected_enbs:
-                            existing_pci = existing.get('pci') or existing.get('cell_id')
-                            if (existing_pci, existing.get('earfcn')) == enb_key:
+                        existing_pci = existing.get('pci') or existing.get('cell_id')
+                        existing_plmn = existing.get('plmn')
+                        
+                        # PCI가 같거나, PLMN이 같거나, 둘 다 None이 아니면 같은 eNB로 간주
+                        pci_match = pci and existing_pci and pci == existing_pci
+                        plmn_match = plmn and existing_plmn and plmn == existing_plmn
+                        both_none = (not pci and not existing_pci) or (not plmn and not existing_plmn)
+                        
+                        # 같은 EARFCN이고 (PCI 또는 PLMN이 일치하거나, 둘 다 없으면) 시간이 가까우면 병합
+                        if (pci_match or plmn_match or (both_none and existing.get('earfcn') == earfcn)):
+                            # 시간 확인 (최근 탐지된 eNB인지)
+                            existing_time_str = existing.get('timestamp')
+                            if existing_time_str:
+                                try:
+                                    # ISO 형식 타임스탬프 파싱
+                                    existing_time = datetime.fromisoformat(existing_time_str.replace('Z', '+00:00')).timestamp()
+                                    if abs(current_time - existing_time) < merge_window:
+                                        existing_enb = existing
+                                        break
+                                except:
+                                    # 파싱 실패 시 그냥 병합
+                                    existing_enb = existing
+                                    break
+                            else:
+                                # 타임스탬프가 없으면 그냥 병합
                                 existing_enb = existing
                                 break
+                    
+                    if existing_enb:
+                        # 기존 정보와 병합
+                        merged = False
+                        for key, value in enb_info.items():
+                            if value and (key not in existing_enb or existing_enb[key] == 'N/A' or existing_enb[key] is None):
+                                existing_enb[key] = value
+                                merged = True
                         
-                        if existing_enb:
-                            # 기존 정보와 병합
-                            for key, value in enb_info.items():
-                                if key not in existing_enb or existing_enb[key] == 'N/A' or existing_enb[key] is None:
-                                    existing_enb[key] = value
-                        else:
-                            # 새로운 eNB 추가
+                        if merged:
+                            logger.info(f"✓ eNB 정보 업데이트: PLMN={existing_enb.get('plmn', 'N/A')}, "
+                                      f"EARFCN={existing_enb.get('earfcn', 'N/A')}, "
+                                      f"PCI={existing_enb.get('pci', 'N/A')}")
+                    else:
+                        # 새로운 eNB 추가
+                        enb_key = (pci, enb_info.get('earfcn'), plmn)
+                        if enb_key not in seen_enbs:
+                            seen_enbs.add(enb_key)
                             self.detected_enbs.append(enb_info)
                             logger.info(f"✓ eNB 탐지: PLMN={enb_info.get('plmn', 'N/A')}, "
                                       f"EARFCN={enb_info.get('earfcn', 'N/A')}, "
