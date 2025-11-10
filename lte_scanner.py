@@ -326,9 +326,10 @@ imei = 353490069873001
             logger.info(f"한국 통신사 주요 주파수 대역 순차 스캔: {len(earfcns_to_scan)}개 주파수")
         
         # 각 주파수별로 스캔
+        # PLMN을 읽기 위해서는 충분한 시간이 필요함 (핸드폰처럼)
         scan_time_per_freq = self.scan_duration // len(earfcns_to_scan) if len(earfcns_to_scan) > 1 else self.scan_duration
-        if scan_time_per_freq < 5:
-            scan_time_per_freq = 5  # 최소 5초
+        if scan_time_per_freq < 10:
+            scan_time_per_freq = 10  # 최소 10초 (PLMN 읽기 위해)
         
         try:
             for idx, earfcn in enumerate(earfcns_to_scan):
@@ -378,6 +379,7 @@ imei = 353490069873001
             
             start_time = time.time()
             seen_enbs = set()
+            last_cell_found_time = 0  # 마지막으로 셀을 찾은 시간
             
             # 로그 파일도 모니터링
             log_lines_read = 0
@@ -426,8 +428,12 @@ imei = 353490069873001
                     if 'earfcn' not in enb_info:
                         enb_info['earfcn'] = earfcn
                     
-                    # 노이즈 필터링: PCI가 0, 1, 2 같은 작은 값이고 PLMN 정보가 없으면 무시
+                    # 셀을 찾았으면 시간 기록 (PLMN 읽기를 위해 더 기다려야 함)
                     pci = enb_info.get('pci') or enb_info.get('cell_id')
+                    if pci and pci > 2:
+                        last_cell_found_time = time.time()
+                    
+                    # 노이즈 필터링: PCI가 0, 1, 2 같은 작은 값이고 PLMN 정보가 없으면 무시
                     plmn = enb_info.get('plmn')
                     
                     # PCI가 0-2 범위이고 PLMN이 없으면 노이즈로 간주
@@ -523,14 +529,19 @@ imei = 353490069873001
                                       f"RSRP={enb_info.get('rsrp', 'N/A')} dBm")
             
             # 프로세스 종료 전에 PLMN 정보를 읽을 시간을 더 줌
-            # 셀을 찾은 후 PLMN을 읽는 데 시간이 필요함
+            # 셀을 찾은 후 PLMN을 읽는 데 시간이 필요함 (핸드폰처럼)
             if process.poll() is None:
-                # 종료 전에 3초 더 대기하여 PLMN 정보를 읽을 기회 제공
-                # (너무 길면 전체 스캔 시간이 늘어남)
-                remaining_time = duration - (time.time() - start_time)
-                if remaining_time > 3:
-                    logger.debug(f"EARFCN {earfcn}: PLMN 정보 읽기를 위해 추가 대기 중...")
-                    time.sleep(3)
+                # 마지막으로 셀을 찾은 후 최소 10초는 기다려서 PLMN을 읽을 기회 제공
+                current_time = time.time()
+                time_since_last_cell = current_time - last_cell_found_time if last_cell_found_time > 0 else duration
+                
+                # 셀을 찾았는데 PLMN을 아직 읽지 못했을 수 있으므로 추가 대기
+                if last_cell_found_time > 0 and time_since_last_cell < 10:
+                    wait_time = 10 - time_since_last_cell
+                    remaining_time = duration - (current_time - start_time)
+                    if wait_time > 0 and remaining_time > wait_time:
+                        logger.info(f"EARFCN {earfcn}: 셀 발견 후 PLMN 읽기를 위해 {wait_time:.1f}초 추가 대기 중...")
+                        time.sleep(wait_time)
                 
                 process.terminate()
                 try:
