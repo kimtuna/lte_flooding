@@ -126,8 +126,82 @@ pregenerate_signals = true
         
         return None
     
+    def check_usrp_connection(self) -> bool:
+        """USRP 장치 연결 확인"""
+        logger.info("USRP 장치 연결 확인 중...")
+        
+        try:
+            # uhd_find_devices로 장치 확인
+            result = subprocess.run(
+                ["uhd_find_devices"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            # 시리얼 번호 추출
+            serial_match = re.search(r'serial:\s*([^\s,]+)', result.stdout + result.stderr)
+            if serial_match:
+                found_serial = serial_match.group(1)
+                # 사용자가 지정한 시리얼과 비교
+                if f"serial={found_serial}" in self.usrp_args or found_serial in self.usrp_args:
+                    logger.info(f"✓ USRP 장치 연결 확인됨: serial={found_serial}")
+                    return True
+            
+            # srsUE로 직접 확인 시도
+            test_cmd = [
+                "srsue",
+                self.create_scanner_config(),
+                "--log.all_level", "error",
+                "--log.filename", "/dev/null"
+            ]
+            
+            test_process = subprocess.Popen(
+                test_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            # 3초 동안 실행하여 연결 확인
+            time.sleep(3)
+            
+            if test_process.poll() is None:
+                # 프로세스가 실행 중이면 연결 성공 가능성
+                test_process.terminate()
+                test_process.wait(timeout=2)
+                logger.info("✓ USRP 장치 연결 확인됨 (srsUE 실행 가능)")
+                return True
+            else:
+                # 프로세스가 종료되었으면 오류 확인
+                _, stderr = test_process.communicate()
+                if "error" in stderr.lower() or "failed" in stderr.lower():
+                    logger.error("✗ USRP 장치 연결 실패")
+                    logger.error(f"오류: {stderr[:200]}")
+                    return False
+                else:
+                    logger.info("✓ USRP 장치 연결 확인됨")
+                    return True
+                    
+        except subprocess.TimeoutExpired:
+            logger.warning("USRP 확인 시간 초과")
+            return False
+        except FileNotFoundError:
+            logger.error("✗ srsUE를 찾을 수 없습니다. srsRAN이 설치되어 있는지 확인하세요.")
+            return False
+        except Exception as e:
+            logger.warning(f"USRP 확인 중 오류: {e}")
+            # 오류가 있어도 일단 시도는 해보도록
+            return True
+    
     def scan(self) -> List[Dict]:
         """eNB 스캔 실행"""
+        # USRP 연결 확인
+        if not self.check_usrp_connection():
+            logger.error("USRP 장치 연결을 확인할 수 없습니다. 계속 진행할까요? (y/n)")
+            # 자동으로 계속 진행 (인터랙티브 모드가 아닐 때는)
+            logger.warning("연결 확인 실패했지만 계속 진행합니다...")
+        
         config_path = self.create_scanner_config()
         log_file = "srsue_scanner.log"
         
@@ -153,6 +227,26 @@ pregenerate_signals = true
                 universal_newlines=True,
                 bufsize=1
             )
+            
+            # 초기 연결 확인 (3초 대기)
+            logger.info("USRP 장치 연결 확인 중...")
+            time.sleep(3)
+            
+            if self.process.poll() is not None:
+                # 프로세스가 종료되었으면 오류
+                stdout, _ = self.process.communicate()
+                logger.error("✗ USRP 장치 연결 실패")
+                if stdout:
+                    error_lines = stdout.split('\n')[:5]
+                    for line in error_lines:
+                        if 'error' in line.lower() or 'fail' in line.lower():
+                            logger.error(f"  오류: {line.strip()}")
+                logger.error("  → USRP 장치가 연결되어 있는지 확인하세요")
+                logger.error("  → 시리얼 번호가 올바른지 확인하세요: uhd_find_devices")
+                return []
+            
+            logger.info("✓ USRP 장치 연결 성공!")
+            logger.info("✓ 스캔 진행 중...")
             
             start_time = time.time()
             seen_enbs = set()
