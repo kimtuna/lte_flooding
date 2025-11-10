@@ -426,15 +426,21 @@ imei = 353490069873001
                     if 'earfcn' not in enb_info:
                         enb_info['earfcn'] = earfcn
                     
+                    # 노이즈 필터링: PCI가 0, 1, 2 같은 작은 값이고 PLMN 정보가 없으면 무시
+                    pci = enb_info.get('pci') or enb_info.get('cell_id')
+                    plmn = enb_info.get('plmn')
+                    
+                    # PCI가 0-2 범위이고 PLMN이 없으면 노이즈로 간주
+                    if pci is not None and pci <= 2 and not plmn:
+                        continue
+                    
                     # 같은 EARFCN에서 짧은 시간 내에 탐지된 eNB 정보 병합
                     # (여러 라인에 걸쳐 정보가 나오는 경우)
                     current_time = time.time()
-                    merge_window = 5  # 5초 이내에 탐지된 정보는 같은 eNB로 간주
+                    merge_window = 10  # 10초 이내에 탐지된 정보는 같은 eNB로 간주
                     
                     # 기존 eNB 정보와 병합 시도
                     existing_enb = None
-                    pci = enb_info.get('pci') or enb_info.get('cell_id')
-                    plmn = enb_info.get('plmn')
                     
                     for existing in self.detected_enbs:
                         # 같은 EARFCN인지 확인
@@ -444,13 +450,12 @@ imei = 353490069873001
                         existing_pci = existing.get('pci') or existing.get('cell_id')
                         existing_plmn = existing.get('plmn')
                         
-                        # PCI가 같거나, PLMN이 같거나, 둘 다 None이 아니면 같은 eNB로 간주
+                        # PCI가 같거나, PLMN이 같으면 같은 eNB로 간주
                         pci_match = pci and existing_pci and pci == existing_pci
                         plmn_match = plmn and existing_plmn and plmn == existing_plmn
-                        both_none = (not pci and not existing_pci) or (not plmn and not existing_plmn)
                         
-                        # 같은 EARFCN이고 (PCI 또는 PLMN이 일치하거나, 둘 다 없으면) 시간이 가까우면 병합
-                        if (pci_match or plmn_match or (both_none and existing.get('earfcn') == earfcn)):
+                        # 같은 EARFCN이고 (PCI 또는 PLMN이 일치하면) 시간이 가까우면 병합
+                        if pci_match or plmn_match:
                             # 시간 확인 (최근 탐지된 eNB인지)
                             existing_time_str = existing.get('timestamp')
                             if existing_time_str:
@@ -468,6 +473,18 @@ imei = 353490069873001
                                 # 타임스탬프가 없으면 그냥 병합
                                 existing_enb = existing
                                 break
+                        
+                        # 같은 EARFCN에서 PLMN이 있고 PCI가 없으면, PCI 정보를 추가
+                        if existing_plmn and not existing_pci and pci and pci > 2:
+                            existing_time_str = existing.get('timestamp')
+                            if existing_time_str:
+                                try:
+                                    existing_time = datetime.fromisoformat(existing_time_str.replace('Z', '+00:00')).timestamp()
+                                    if abs(current_time - existing_time) < merge_window:
+                                        existing_enb = existing
+                                        break
+                                except:
+                                    pass
                     
                     if existing_enb:
                         # 기존 정보와 병합
@@ -549,6 +566,22 @@ imei = 353490069873001
     
     def save_results(self):
         """결과 저장"""
+        # 노이즈 필터링: PLMN 정보가 없고 PCI가 0-2 범위인 eNB 제거
+        filtered_enbs = []
+        for enb in self.detected_enbs:
+            pci = enb.get('pci') or enb.get('cell_id')
+            plmn = enb.get('plmn')
+            
+            # PLMN이 있으면 유효한 eNB
+            if plmn:
+                filtered_enbs.append(enb)
+            # PLMN이 없어도 PCI가 3 이상이면 유효한 eNB로 간주
+            elif pci and pci > 2:
+                filtered_enbs.append(enb)
+            # 그 외는 노이즈로 간주하고 제외
+        
+        self.detected_enbs = filtered_enbs
+        
         if not self.detected_enbs:
             logger.warning("탐지된 eNB가 없습니다.")
             return
