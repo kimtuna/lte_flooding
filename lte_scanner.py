@@ -474,8 +474,20 @@ imei = 353490069873001
                                 existing_enb = existing
                                 break
                         
-                        # 같은 EARFCN에서 PLMN이 있고 PCI가 없으면, PCI 정보를 추가
-                        if existing_plmn and not existing_pci and pci and pci > 2:
+                        # 같은 EARFCN에서 하나는 PLMN만 있고 다른 하나는 PCI만 있으면 병합
+                        # 경우 1: existing에 PLMN이 있고 PCI가 없고, 현재에 PCI만 있으면 병합
+                        if existing_plmn and not existing_pci and pci and pci > 2 and not plmn:
+                            existing_time_str = existing.get('timestamp')
+                            if existing_time_str:
+                                try:
+                                    existing_time = datetime.fromisoformat(existing_time_str.replace('Z', '+00:00')).timestamp()
+                                    if abs(current_time - existing_time) < merge_window:
+                                        existing_enb = existing
+                                        break
+                                except:
+                                    pass
+                        # 경우 2: existing에 PCI가 있고 PLMN이 없고, 현재에 PLMN만 있으면 병합
+                        elif existing_pci and not existing_plmn and plmn and not pci:
                             existing_time_str = existing.get('timestamp')
                             if existing_time_str:
                                 try:
@@ -568,7 +580,6 @@ imei = 353490069873001
         """결과 저장"""
         # 최종 병합: 같은 EARFCN에서 PLMN과 PCI 정보를 병합
         merged_enbs = []
-        seen_keys = set()
         
         for enb in self.detected_enbs:
             earfcn = enb.get('earfcn')
@@ -582,11 +593,18 @@ imei = 353490069873001
                     merged_pci = merged_enb.get('pci') or merged_enb.get('cell_id')
                     merged_plmn = merged_enb.get('plmn')
                     
-                    # PCI가 같거나, PLMN이 같거나, 하나는 PLMN이 있고 다른 하나는 PCI가 있으면 병합
-                    if (pci and merged_pci and pci == merged_pci) or \
-                       (plmn and merged_plmn and plmn == merged_plmn) or \
-                       (plmn and not merged_plmn and pci and merged_pci and pci == merged_pci) or \
-                       (merged_plmn and not plmn and pci and merged_pci and pci == merged_pci):
+                    # 병합 조건:
+                    # 1. PCI가 같으면 병합
+                    # 2. PLMN이 같으면 병합
+                    # 3. 같은 EARFCN에서 하나는 PCI만 있고 다른 하나는 PLMN만 있으면 병합 (같은 eNB의 다른 정보)
+                    pci_match = pci and merged_pci and pci == merged_pci
+                    plmn_match = plmn and merged_plmn and plmn == merged_plmn
+                    # 현재 eNB에 PCI만 있고 merged_enb에 PLMN만 있으면 병합
+                    # 또는 현재 eNB에 PLMN만 있고 merged_enb에 PCI만 있으면 병합
+                    complementary = (pci and not plmn and not merged_pci and merged_plmn) or \
+                                   (not pci and plmn and merged_pci and not merged_plmn)
+                    
+                    if pci_match or plmn_match or complementary:
                         # 정보 병합
                         for key, value in enb.items():
                             if value and (key not in merged_enb or merged_enb[key] == 'N/A' or merged_enb[key] is None):
