@@ -522,7 +522,13 @@ imei = 353490069873001
                                       f"Cell ID={enb_info.get('cell_id', 'N/A')}, "
                                       f"RSRP={enb_info.get('rsrp', 'N/A')} dBm")
             
+            # 프로세스 종료 전에 PLMN 정보를 읽을 시간을 더 줌
+            # 셀을 찾은 후 PLMN을 읽는 데 시간이 필요함
             if process.poll() is None:
+                # 종료 전에 5초 더 대기하여 PLMN 정보를 읽을 기회 제공
+                logger.debug(f"EARFCN {earfcn}: PLMN 정보 읽기를 위해 추가 대기 중...")
+                time.sleep(5)
+                
                 process.terminate()
                 try:
                     process.wait(timeout=5)
@@ -530,13 +536,18 @@ imei = 353490069873001
                     process.kill()
                     process.wait()
             
-            # 스캔 완료 후 로그 파일에서 최종 확인
+            # 스캔 완료 후 로그 파일에서 최종 확인 및 PLMN 정보 추출
             if os.path.exists(log_file):
                 try:
                     with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                         log_content = f.read()
                         # 로그에서 eNB 관련 정보 추출
                         log_lines = log_content.split('\n')
+                        
+                        # PCI별로 그룹화하여 PLMN 정보 매칭
+                        pci_plmn_map = {}  # {pci: plmn}
+                        pci_enb_map = {}   # {pci: enb_info}
+                        
                         for log_line in log_lines:
                             if any(kw in log_line.lower() for kw in ['found cell', 'found plmn', 'pci=', 'plmn']):
                                 # 로그 라인 파싱 시도
@@ -545,31 +556,60 @@ imei = 353490069873001
                                     if 'earfcn' not in enb_info:
                                         enb_info['earfcn'] = earfcn
                                     
-                                    # 기존 eNB와 병합 확인
                                     pci = enb_info.get('pci') or enb_info.get('cell_id')
                                     plmn = enb_info.get('plmn')
                                     
-                                    existing_enb = None
-                                    for existing in self.detected_enbs:
-                                        if existing.get('earfcn') == earfcn:
-                                            existing_pci = existing.get('pci') or existing.get('cell_id')
-                                            existing_plmn = existing.get('plmn')
-                                            if (pci and existing_pci and pci == existing_pci) or \
-                                               (plmn and existing_plmn and plmn == existing_plmn):
-                                                existing_enb = existing
-                                                break
+                                    if pci:
+                                        if pci not in pci_enb_map:
+                                            pci_enb_map[pci] = enb_info
+                                        else:
+                                            # 정보 병합
+                                            for key, value in enb_info.items():
+                                                if value and (key not in pci_enb_map[pci] or pci_enb_map[pci][key] == 'N/A' or pci_enb_map[pci][key] is None):
+                                                    pci_enb_map[pci][key] = value
                                     
-                                    if existing_enb:
-                                        # 병합
-                                        for key, value in enb_info.items():
-                                            if value and (key not in existing_enb or existing_enb[key] == 'N/A' or existing_enb[key] is None):
-                                                existing_enb[key] = value
-                                    else:
-                                        # 새로 추가
-                                        enb_key = (pci, earfcn, plmn)
-                                        if enb_key not in seen_enbs:
-                                            seen_enbs.add(enb_key)
-                                            self.detected_enbs.append(enb_info)
+                                    if plmn and pci:
+                                        pci_plmn_map[pci] = plmn
+                        
+                        # PLMN 정보가 있는 PCI에 대해 기존 eNB 업데이트
+                        for pci, plmn in pci_plmn_map.items():
+                            for existing in self.detected_enbs:
+                                if existing.get('earfcn') == earfcn:
+                                    existing_pci = existing.get('pci') or existing.get('cell_id')
+                                    if existing_pci == pci and not existing.get('plmn'):
+                                        existing['plmn'] = plmn
+                                        existing['mcc'] = int(plmn[:3]) if len(plmn) >= 3 else None
+                                        existing['mnc'] = int(plmn[3:]) if len(plmn) >= 5 else None
+                                        logger.info(f"✓ PLMN 정보 추가: PCI={pci}, PLMN={plmn}")
+                        
+                        # 로그에서 발견된 새로운 eNB 정보 추가
+                        for pci, enb_info in pci_enb_map.items():
+                            if enb_info.get('plmn') or (pci and pci > 2):  # PLMN이 있거나 PCI가 유효한 경우만
+                                # 기존 eNB와 병합 확인
+                                existing_enb = None
+                                for existing in self.detected_enbs:
+                                    if existing.get('earfcn') == earfcn:
+                                        existing_pci = existing.get('pci') or existing.get('cell_id')
+                                        existing_plmn = existing.get('plmn')
+                                        enb_pci = enb_info.get('pci') or enb_info.get('cell_id')
+                                        enb_plmn = enb_info.get('plmn')
+                                        
+                                        if (pci and existing_pci and pci == existing_pci) or \
+                                           (enb_plmn and existing_plmn and enb_plmn == existing_plmn):
+                                            existing_enb = existing
+                                            break
+                                
+                                if existing_enb:
+                                    # 병합
+                                    for key, value in enb_info.items():
+                                        if value and (key not in existing_enb or existing_enb[key] == 'N/A' or existing_enb[key] is None):
+                                            existing_enb[key] = value
+                                else:
+                                    # 새로 추가
+                                    enb_key = (pci, earfcn, enb_info.get('plmn'))
+                                    if enb_key not in seen_enbs:
+                                        seen_enbs.add(enb_key)
+                                        self.detected_enbs.append(enb_info)
                 except Exception as e:
                     logger.debug(f"로그 파일 분석 중 오류: {e}")
                     
