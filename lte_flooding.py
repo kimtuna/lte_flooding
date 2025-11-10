@@ -13,6 +13,7 @@ import os
 from typing import List, Optional
 import argparse
 import logging
+from pathlib import Path
 
 # 로깅 설정
 logging.basicConfig(
@@ -48,6 +49,40 @@ class LTEFlooder:
         self.processes: List[subprocess.Popen] = []
         self.running = False
         self.threads: List[threading.Thread] = []
+        
+        # .env 파일에서 USIM 키 로드
+        self.usim_opc, self.usim_k = self._load_usim_keys()
+    
+    def _load_usim_keys(self) -> tuple[str, str]:
+        """환경변수 또는 .env 파일에서 USIM 키 로드"""
+        # 환경변수에서 먼저 확인
+        opc = os.getenv('USIM_OPC')
+        k = os.getenv('USIM_K')
+        
+        # .env 파일에서 로드
+        env_file = Path('.env')
+        if env_file.exists():
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('#') or not line:
+                        continue
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        if key == 'USIM_OPC' and not opc:
+                            opc = value
+                        elif key == 'USIM_K' and not k:
+                            k = value
+        
+        # .env 파일이나 환경변수에서 값을 찾지 못한 경우
+        if not opc or not k:
+            logger.error("USIM 키를 찾을 수 없습니다. .env 파일 또는 환경변수(USIM_OPC, USIM_K)를 설정하세요.")
+            logger.error("예제: .env 파일에 'USIM_OPC=...' 및 'USIM_K=...' 추가")
+            raise ValueError("USIM 키가 설정되지 않았습니다. .env 파일을 확인하세요.")
+        
+        return opc, k
         
     def create_ue_config(self, instance_id: int) -> str:
         """각 인스턴스별 고유한 설정 파일 생성"""
@@ -112,8 +147,8 @@ nof_carriers = 1
 [usim]
 mode = soft
 algo = milenage
-opc  = 63bfa50ee6523365ff14c1f45f88737d
-k    = 00112233445566778899aabbccddeeff
+opc  = {self.usim_opc}
+k    = {self.usim_k}
 imsi = {imsi}
 imei = 353490069873{instance_id:03d}
 """

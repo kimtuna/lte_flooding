@@ -22,3 +22,6 @@ srsue_*.conf
 .DS_Store
 Thumbs.db
 
+# Environment variables
+.env
+
