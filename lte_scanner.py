@@ -240,6 +240,8 @@ imei = 353490069873001
     
     def scan(self) -> List[Dict]:
         """eNB 스캔 실행"""
+        self.running = True  # 스캔 시작 플래그 설정
+        
         # USRP 연결 확인
         if not self.check_usrp_connection():
             logger.error("USRP 장치 연결을 확인할 수 없습니다. 계속 진행할까요? (y/n)")
@@ -277,6 +279,8 @@ imei = 353490069873001
             logger.info("\n스캔 중지됨")
         except Exception as e:
             logger.error(f"스캔 중 오류: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
         finally:
             self.running = False
         
