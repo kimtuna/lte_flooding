@@ -93,35 +93,93 @@ imei = 353490069873001
         line_lower = line.lower()
         
         # eNB 발견 관련 키워드 확인
-        if not any(keyword in line_lower for keyword in ['cell', 'plmn', 'earfcn', 'found', 'detected', 'rsrp', 'rsrq']):
+        if not any(keyword in line_lower for keyword in ['cell', 'plmn', 'earfcn', 'found', 'detected', 'rsrp', 'rsrq', 'pci']):
             return None
         
         enb_info = {}
         
+        # 형식: "Found PLMN:  Id=45006, TAC=17000"
+        plmn_id_match = re.search(r'Found PLMN[:\s]+Id=(\d+)', line, re.IGNORECASE)
+        if plmn_id_match:
+            plmn_id = plmn_id_match.group(1)
+            # PLMN ID는 보통 5-6자리 (MCC 3자리 + MNC 2-3자리)
+            if len(plmn_id) == 5:
+                enb_info['mcc'] = int(plmn_id[:3])
+                enb_info['mnc'] = int(plmn_id[3:])
+                enb_info['plmn'] = plmn_id
+            elif len(plmn_id) == 6:
+                enb_info['mcc'] = int(plmn_id[:3])
+                enb_info['mnc'] = int(plmn_id[3:])
+                enb_info['plmn'] = plmn_id
+            else:
+                # 그 외의 경우 그대로 저장
+                enb_info['plmn'] = plmn_id
+                # PLMN ID에서 MCC/MNC 추출 시도
+                if len(plmn_id) >= 3:
+                    enb_info['mcc'] = int(plmn_id[:3])
+                    if len(plmn_id) >= 5:
+                        enb_info['mnc'] = int(plmn_id[3:5])
+                    elif len(plmn_id) >= 4:
+                        enb_info['mnc'] = int(plmn_id[3:])
+        
+        # TAC 파싱
+        tac_match = re.search(r'TAC[=:\s]+(\d+)', line, re.IGNORECASE)
+        if tac_match:
+            enb_info['tac'] = int(tac_match.group(1))
+        
+        # 형식: "Found Cell:  Mode=FDD, PCI=460, PRB=50, Ports=2, CP=Normal, CFO=-1.7 KHz"
+        # PCI (Physical Cell ID) 파싱
+        pci_match = re.search(r'PCI[=:\s]+(\d+)', line, re.IGNORECASE)
+        if pci_match:
+            enb_info['pci'] = int(pci_match.group(1))
+            # PCI를 Cell ID로도 사용 (실제 Cell ID는 별도로 받아야 하지만 일단 PCI 사용)
+            if 'cell_id' not in enb_info:
+                enb_info['cell_id'] = int(pci_match.group(1))
+        
+        # PRB (Physical Resource Block) 파싱
+        prb_match = re.search(r'PRB[=:\s]+(\d+)', line, re.IGNORECASE)
+        if prb_match:
+            enb_info['prb'] = int(prb_match.group(1))
+            # PRB를 bandwidth로 변환 (PRB * 0.18 MHz, 대략적으로)
+            prb_value = int(prb_match.group(1))
+            if prb_value == 6:
+                enb_info['bandwidth'] = 1.4
+            elif prb_value == 15:
+                enb_info['bandwidth'] = 3
+            elif prb_value == 25:
+                enb_info['bandwidth'] = 5
+            elif prb_value == 50:
+                enb_info['bandwidth'] = 10
+            elif prb_value == 75:
+                enb_info['bandwidth'] = 15
+            elif prb_value == 100:
+                enb_info['bandwidth'] = 20
+        
         # 다양한 PLMN 정보 형식 파싱
         # 형식 1: PLMN: MCC=123 MNC=456
-        plmn_match = re.search(r'PLMN[:\s]*MCC[=:\s]*(\d+)[\s,]+MNC[=:\s]*(\d+)', line, re.IGNORECASE)
-        if not plmn_match:
-            # 형식 2: MCC: 123, MNC: 456
-            plmn_match = re.search(r'MCC[:\s]+(\d+).*?MNC[:\s]+(\d+)', line, re.IGNORECASE)
-        if not plmn_match:
-            # 형식 3: PLMN: 123456
-            plmn_match = re.search(r'PLMN[:\s]+(\d{5,6})', line, re.IGNORECASE)
-            if plmn_match:
-                plmn_str = plmn_match.group(1)
-                if len(plmn_str) == 5:
-                    enb_info['mcc'] = int(plmn_str[:3])
-                    enb_info['mnc'] = int(plmn_str[3:])
-                    enb_info['plmn'] = plmn_str
-                elif len(plmn_str) == 6:
-                    enb_info['mcc'] = int(plmn_str[:3])
-                    enb_info['mnc'] = int(plmn_str[3:])
-                    enb_info['plmn'] = plmn_str
-        
-        if plmn_match and 'mcc' not in enb_info:
-            enb_info['mcc'] = int(plmn_match.group(1))
-            enb_info['mnc'] = int(plmn_match.group(2))
-            enb_info['plmn'] = f"{plmn_match.group(1)}{plmn_match.group(2)}"
+        if 'mcc' not in enb_info:
+            plmn_match = re.search(r'PLMN[:\s]*MCC[=:\s]*(\d+)[\s,]+MNC[=:\s]*(\d+)', line, re.IGNORECASE)
+            if not plmn_match:
+                # 형식 2: MCC: 123, MNC: 456
+                plmn_match = re.search(r'MCC[:\s]+(\d+).*?MNC[:\s]+(\d+)', line, re.IGNORECASE)
+            if not plmn_match:
+                # 형식 3: PLMN: 123456
+                plmn_match = re.search(r'PLMN[:\s]+(\d{5,6})', line, re.IGNORECASE)
+                if plmn_match:
+                    plmn_str = plmn_match.group(1)
+                    if len(plmn_str) == 5:
+                        enb_info['mcc'] = int(plmn_str[:3])
+                        enb_info['mnc'] = int(plmn_str[3:])
+                        enb_info['plmn'] = plmn_str
+                    elif len(plmn_str) == 6:
+                        enb_info['mcc'] = int(plmn_str[:3])
+                        enb_info['mnc'] = int(plmn_str[3:])
+                        enb_info['plmn'] = plmn_str
+            
+            if plmn_match and 'mcc' not in enb_info:
+                enb_info['mcc'] = int(plmn_match.group(1))
+                enb_info['mnc'] = int(plmn_match.group(2))
+                enb_info['plmn'] = f"{plmn_match.group(1)}{plmn_match.group(2)}"
         
         # EARFCN 정보 파싱 (다양한 형식)
         earfcn_match = re.search(r'earfcn[:\s]+(\d+)', line, re.IGNORECASE)
@@ -131,29 +189,30 @@ imei = 353490069873001
             enb_info['earfcn'] = int(earfcn_match.group(1))
         
         # Cell ID 파싱 (다양한 형식)
-        cellid_match = re.search(r'cell[_\s]?id[:\s]+(\d+)', line, re.IGNORECASE)
-        if not cellid_match:
-            cellid_match = re.search(r'id[:\s]+(\d+)', line, re.IGNORECASE)
-        if cellid_match:
-            enb_info['cell_id'] = int(cellid_match.group(1))
+        if 'cell_id' not in enb_info:
+            cellid_match = re.search(r'cell[_\s]?id[=:\s]+(\d+)', line, re.IGNORECASE)
+            if not cellid_match:
+                cellid_match = re.search(r'id[=:\s]+(\d+)', line, re.IGNORECASE)
+            if cellid_match:
+                enb_info['cell_id'] = int(cellid_match.group(1))
         
         # RSRP 파싱
-        rsrp_match = re.search(r'rsrp[:\s]+([-\d.]+)', line, re.IGNORECASE)
+        rsrp_match = re.search(r'rsrp[=:\s]+([-\d.]+)', line, re.IGNORECASE)
         if rsrp_match:
             enb_info['rsrp'] = float(rsrp_match.group(1))
         
         # RSRQ 파싱
-        rsrq_match = re.search(r'rsrq[:\s]+([-\d.]+)', line, re.IGNORECASE)
+        rsrq_match = re.search(r'rsrq[=:\s]+([-\d.]+)', line, re.IGNORECASE)
         if rsrq_match:
             enb_info['rsrq'] = float(rsrq_match.group(1))
         
-        # Bandwidth 파싱
-        bw_match = re.search(r'(?:bw|bandwidth)[:\s]+(\d+)', line, re.IGNORECASE)
-        if bw_match:
-            enb_info['bandwidth'] = int(bw_match.group(1))
+        # CFO 파싱
+        cfo_match = re.search(r'CFO[=:\s]+([-\d.]+)', line, re.IGNORECASE)
+        if cfo_match:
+            enb_info['cfo'] = float(cfo_match.group(1))
         
-        # 최소한 Cell ID나 PLMN 정보가 있어야 유효한 eNB 정보로 간주
-        if enb_info and ('cell_id' in enb_info or 'plmn' in enb_info):
+        # 최소한 PCI, Cell ID, 또는 PLMN 정보가 있어야 유효한 eNB 정보로 간주
+        if enb_info and ('pci' in enb_info or 'cell_id' in enb_info or 'plmn' in enb_info):
             enb_info['timestamp'] = datetime.now().isoformat()
             return enb_info
         
