@@ -31,7 +31,7 @@ class LTEScanner:
         """
         Args:
             usrp_args: USRP 장치 인자 (예: "serial=30AD123")
-            earfcn: 주파수 채널 번호 (None이면 모든 주파수 스캔)
+            earfcn: 주파수 채널 번호 (None이면 한국 통신사 주요 주파수 순차 스캔)
             scan_duration: 스캔 지속 시간 (초)
             output_file: 결과를 저장할 파일 경로
         """
@@ -43,15 +43,23 @@ class LTEScanner:
         self.running = False
         self.detected_enbs: List[Dict] = []
         
-    def create_scanner_config(self) -> str:
+        # 한국 통신사 주요 주파수 대역 (EARFCN)
+        # - 800MHz (Band 5): 2400-2649
+        # - 1800MHz (Band 3): 1200-1949  
+        # - 2100MHz (Band 1): 0-599
+        # - 2600MHz (Band 7): 2750-3449
+        self.korean_earfcns = [100, 300, 500, 1200, 1500, 1800, 2400, 2600, 3000, 3400]
+        
+    def create_scanner_config(self, earfcn: Optional[int] = None) -> str:
         """스캐너용 UE 설정 파일 생성"""
-        earfcn_line = ""
-        if self.earfcn is not None:
-            earfcn_line = f"dl_earfcn = {self.earfcn}"
+        if earfcn is None:
+            earfcn = self.earfcn
+        
+        if earfcn is not None:
+            earfcn_line = f"dl_earfcn = {earfcn}"
         else:
-            # 주파수를 지정하지 않으면 srsUE가 자동으로 모든 주파수를 스캔
-            # 주석 처리하면 srsUE가 자동 스캔 모드로 동작
-            earfcn_line = "# dl_earfcn =  # 자동 스캔 (모든 주파수)"
+            # 주파수를 지정하지 않으면 기본값으로 1800MHz 대역 사용 (한국 통신사 주요 주파수)
+            earfcn_line = "dl_earfcn = 1500"
         
         config_content = f"""[rf]
 device_name = uhd
@@ -238,15 +246,44 @@ imei = 353490069873001
             # 자동으로 계속 진행 (인터랙티브 모드가 아닐 때는)
             logger.warning("연결 확인 실패했지만 계속 진행합니다...")
         
-        config_path = self.create_scanner_config()
         log_file = "srsue_scanner.log"
         
-        logger.info(f"주변 eNB 스캔 시작... (지속 시간: {self.scan_duration}초)")
-        if self.earfcn:
+        # 스캔할 주파수 목록 결정
+        if self.earfcn is not None:
+            # 특정 주파수만 스캔
+            earfcns_to_scan = [self.earfcn]
+            logger.info(f"주변 eNB 스캔 시작... (지속 시간: {self.scan_duration}초)")
             logger.info(f"주파수: EARFCN {self.earfcn}")
         else:
-            logger.info("모든 주파수 스캔")
+            # 여러 주파수를 순차적으로 스캔
+            earfcns_to_scan = self.korean_earfcns
+            logger.info(f"주변 eNB 스캔 시작... (지속 시간: {self.scan_duration}초)")
+            logger.info(f"한국 통신사 주요 주파수 대역 순차 스캔: {len(earfcns_to_scan)}개 주파수")
         
+        # 각 주파수별로 스캔
+        scan_time_per_freq = self.scan_duration // len(earfcns_to_scan) if len(earfcns_to_scan) > 1 else self.scan_duration
+        if scan_time_per_freq < 5:
+            scan_time_per_freq = 5  # 최소 5초
+        
+        try:
+            for idx, earfcn in enumerate(earfcns_to_scan):
+                if not self.running:
+                    break
+                    
+                logger.info(f"\n[{idx+1}/{len(earfcns_to_scan)}] EARFCN {earfcn} 스캔 중... ({scan_time_per_freq}초)")
+                config_path = self.create_scanner_config(earfcn)
+                self._scan_single_frequency(config_path, log_file, scan_time_per_freq, earfcn)
+        except KeyboardInterrupt:
+            logger.info("\n스캔 중지됨")
+        except Exception as e:
+            logger.error(f"스캔 중 오류: {e}")
+        finally:
+            self.running = False
+        
+        return self.detected_enbs
+    
+    def _scan_single_frequency(self, config_path: str, log_file: str, duration: int, earfcn: int):
+        """단일 주파수에 대한 스캔 실행"""
         cmd = [
             "srsue",
             config_path,
@@ -255,8 +292,7 @@ imei = 353490069873001
         ]
         
         try:
-            self.running = True
-            self.process = subprocess.Popen(
+            process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -264,58 +300,27 @@ imei = 353490069873001
                 bufsize=1
             )
             
-            # 초기 연결 확인 (5초 대기하여 실제 연결 상태 확인)
-            logger.info("USRP 장치 연결 확인 중...")
-            time.sleep(5)
+            # 초기 연결 확인 (3초 대기)
+            time.sleep(3)
             
-            if self.process.poll() is not None:
+            if process.poll() is not None:
                 # 프로세스가 종료되었으면 오류
-                stdout, _ = self.process.communicate()
-                logger.error("✗ USRP 장치 연결 실패")
-                
-                # 오류 메시지 파싱
-                if stdout:
-                    error_lines = stdout.split('\n')
-                    found_error = False
-                    for line in error_lines:
-                        line_lower = line.lower()
-                        if any(keyword in line_lower for keyword in ['error', 'fail', 'cannot', 'unable', 'not found', 'no device']):
-                            if not found_error:
-                                logger.error("  상세 오류:")
-                                found_error = True
-                            logger.error(f"    {line.strip()}")
-                    
-                    # 오류가 명확하지 않으면 전체 출력의 일부 표시
-                    if not found_error and len(stdout) > 0:
-                        logger.error(f"  srsUE 출력 (일부):")
-                        for line in error_lines[:10]:
-                            if line.strip():
-                                logger.error(f"    {line.strip()}")
-                
-                logger.error("  → 해결 방법:")
-                logger.error("    1. USRP 장치가 USB에 제대로 연결되어 있는지 확인")
-                logger.error("    2. 시리얼 번호 확인: uhd_find_devices")
-                logger.error("    3. srsRAN이 올바르게 설치되었는지 확인: which srsue")
-                logger.error("    4. 권한 문제일 수 있음 (Linux: sudo 또는 udev 규칙 확인)")
-                return []
-            
-            logger.info("✓ USRP 장치 연결 성공!")
-            logger.info("✓ 스캔 진행 중...")
+                stdout, _ = process.communicate()
+                logger.warning(f"EARFCN {earfcn}: srsUE 프로세스가 조기 종료됨")
+                return
             
             start_time = time.time()
             seen_enbs = set()
             
-            logger.info("스캔 중... (Ctrl+C로 중지 가능)")
-            
             # 로그 파일도 모니터링
             log_lines_read = 0
             
-            while self.running and (time.time() - start_time) < self.scan_duration:
-                if self.process.poll() is not None:
+            while self.running and (time.time() - start_time) < duration:
+                if process.poll() is not None:
                     break
                 
                 # stdout에서 읽기
-                line = self.process.stdout.readline()
+                line = process.stdout.readline()
                 if not line:
                     # 로그 파일에서도 읽기 시도
                     try:
@@ -342,64 +347,43 @@ imei = 353490069873001
                 line_lower = line_stripped.lower()
                 # 중요한 정보는 항상 출력 (verbose 모드가 아니어도)
                 if any(keyword in line_lower for keyword in ['found cell', 'detected cell', 'plmn', 'cell id', 'earfcn', 'rsrp', 'rsrq']):
-                    logger.info(f"[srsUE] {line_stripped}")
+                    logger.info(f"[srsUE EARFCN {earfcn}] {line_stripped}")
                 elif any(keyword in line_lower for keyword in ['cell', 'scan', 'search']):
                     if logging.getLogger().level == logging.DEBUG:
-                        logger.debug(f"[srsUE] {line_stripped}")
+                        logger.debug(f"[srsUE EARFCN {earfcn}] {line_stripped}")
                 
                 # eNB 정보 파싱
                 enb_info = self.parse_srsue_output(line)
                 if enb_info:
+                    # EARFCN 정보 추가
+                    if 'earfcn' not in enb_info:
+                        enb_info['earfcn'] = earfcn
+                    
                     enb_key = (
                         enb_info.get('mcc'),
                         enb_info.get('mnc'),
-                        enb_info.get('cell_id')
+                        enb_info.get('cell_id'),
+                        enb_info.get('earfcn')
                     )
                     
                     if enb_key not in seen_enbs:
                         seen_enbs.add(enb_key)
                         self.detected_enbs.append(enb_info)
-                        logger.info(f"eNB 탐지: PLMN={enb_info.get('plmn', 'N/A')}, "
+                        logger.info(f"✓ eNB 탐지: PLMN={enb_info.get('plmn', 'N/A')}, "
                                   f"EARFCN={enb_info.get('earfcn', 'N/A')}, "
                                   f"Cell ID={enb_info.get('cell_id', 'N/A')}, "
                                   f"RSRP={enb_info.get('rsrp', 'N/A')} dBm")
             
-            if self.process.poll() is None:
-                self.process.terminate()
+            if process.poll() is None:
+                process.terminate()
                 try:
-                    self.process.wait(timeout=5)
+                    process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait()
-            
-            # 스캔 종료 후 로그 파일에서 최종 확인
-            logger.info("스캔 완료. 로그 파일에서 추가 정보 확인 중...")
-            if os.path.exists(log_file):
-                try:
-                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        log_content = f.read()
-                        # 로그에서 eNB 관련 정보 추출
-                        if 'cell' in log_content.lower() or 'plmn' in log_content.lower():
-                            logger.info("로그 파일에 eNB 관련 정보가 발견되었습니다.")
-                            # 마지막 몇 줄 출력
-                            log_lines = log_content.split('\n')
-                            relevant_lines = [l for l in log_lines if any(kw in l.lower() for kw in ['cell', 'plmn', 'earfcn', 'found', 'detected'])]
-                            if relevant_lines:
-                                logger.info("로그에서 발견된 관련 라인 (일부):")
-                                for line in relevant_lines[-10:]:  # 마지막 10줄
-                                    if line.strip():
-                                        logger.info(f"  {line.strip()}")
-                except Exception as e:
-                    logger.warning(f"로그 파일 읽기 오류: {e}")
-            
-        except KeyboardInterrupt:
-            logger.info("\n스캔 중지됨")
+                    process.kill()
+                    process.wait()
+                    
         except Exception as e:
-            logger.error(f"스캔 중 오류: {e}")
-        finally:
-            self.running = False
-        
-        return self.detected_enbs
+            logger.error(f"EARFCN {earfcn} 스캔 중 오류: {e}")
     
     def save_results(self):
         """결과 저장"""
