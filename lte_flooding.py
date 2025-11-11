@@ -440,7 +440,8 @@ imei = 353490069873{unique_id:06d}
                             
                             # 인증 관련 실패 확인
                             auth_failures = [line for line in log_lines if any(kw in line.lower() for kw in [
-                                'authentication failure', 'authentication reject', 'authentication failed'
+                                'authentication failure', 'authentication reject', 'authentication failed',
+                                'auth failure', 'auth reject', 'auth failed'
                             ])]
                             if auth_failures:
                                 logger.error("인증 실패 감지 - USIM 키(opc/k) 또는 IMSI가 올바르지 않을 수 있습니다:")
@@ -449,7 +450,7 @@ imei = 353490069873{unique_id:06d}
                             
                             # 거부 메시지 확인
                             reject_messages = [line for line in log_lines if 'reject' in line.lower() and any(kw in line.lower() for kw in [
-                                'attach', 'rrc', 'nas', 'security'
+                                'attach', 'rrc', 'nas', 'security', 'connection'
                             ])]
                             if reject_messages:
                                 logger.error("연결 거부 감지:")
@@ -462,8 +463,20 @@ imei = 353490069873{unique_id:06d}
                                 logger.warning("타임아웃 감지:")
                                 for line in timeout_messages[-2:]:  # 마지막 2개만 출력
                                     logger.warning(f"  {line.strip()[:300]}")
+                            
+                            # 위의 키워드가 없으면 로그의 마지막 부분 출력 (디버깅용)
+                            if not auth_failures and not reject_messages and not timeout_messages:
+                                logger.warning("상세 실패 원인을 찾지 못했습니다. 로그 파일의 마지막 20줄:")
+                                for line in log_lines[-20:]:
+                                    if line.strip():  # 빈 줄 제외
+                                        logger.warning(f"  {line.strip()[:300]}")
                     except Exception as e:
-                        logger.debug(f"로그 분석 중 오류: {e}")
+                        logger.error(f"로그 분석 중 오류: {e}")
+                        # 오류 발생 시에도 로그 파일 존재 여부 확인
+                        if os.path.exists(log_file):
+                            logger.warning(f"로그 파일은 존재합니다: {log_file} (크기: {os.path.getsize(log_file)} bytes)")
+                        else:
+                            logger.warning(f"로그 파일이 존재하지 않습니다: {log_file}")
                 
                 if connection_success:
                     logger.info(f"연결 성공 - 다음 핸드폰으로 재시작합니다...")
@@ -509,12 +522,9 @@ imei = 353490069873{unique_id:06d}
             target_info.append(f"MCC: {self.mcc}")
         if self.mnc is not None:
             target_info.append(f"MNC: {self.mnc}")
-        if self.mcc is not None and self.mnc is not None:
-            target_info.append(f"(핸드폰 표시: {self.mcc}{self.mnc:02d})")
         
         target_str = ", ".join(target_info) if target_info else "기본 설정"
         logger.info(f"LTE Flooding 시작: 간격: {self.interval}초, 대상: {target_str}")
-        logger.info("매번 다른 IMSI/IMEI로 연결 시도합니다 (다른 핸드폰처럼)")
         
         # 단일 프로세스로 실행 (매번 다른 IMSI/IMEI 사용)
         self.run_flooding()
