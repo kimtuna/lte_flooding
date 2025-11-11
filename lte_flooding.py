@@ -365,36 +365,7 @@ imei = 353490069873{unique_id:06d}
                                     logger.info(f"연결 성공했습니다! (소요 시간: {elapsed:.1f}초)")
                                     break
                                 
-                                # 진행 상황 로깅 (10초마다)
-                                if current_time - last_log_check >= 10.0:
-                                    if enb_found and not rrc_attempted:
-                                        logger.warning(f"셀은 찾았지만 RRC 연결 시도가 없습니다... ({elapsed:.1f}초 경과)")
-                                    elif rrc_attempted and not nas_attempted:
-                                        logger.warning(f"RRC 연결은 시도했지만 NAS 메시지가 없습니다... ({elapsed:.1f}초 경과)")
-                                    last_log_check = current_time
                                 
-                                # 연결 실패 원인 확인 (인증 실패, 거부 등)
-                                failure_keywords = [
-                                    'authentication failure',
-                                    'authentication reject',
-                                    'attach reject',
-                                    'security mode reject',
-                                    'rrc connection reject',
-                                    'rrc connection reestablishment reject',
-                                    'nas reject',
-                                    'reject',
-                                    'authentication failed',
-                                    'security mode command failed'
-                                ]
-                                for keyword in failure_keywords:
-                                    if keyword in log_content.lower():
-                                        # 실패 원인 로그 출력
-                                        lines = log_content.split('\n')
-                                        for line in lines:
-                                            if keyword in line.lower():
-                                                logger.warning(f"연결 실패 원인 감지: {line.strip()[:200]}")
-                                                break
-                                        break
                         except:
                             pass
                     
@@ -471,79 +442,8 @@ imei = 353490069873{unique_id:06d}
                     except:
                         pass
                 
-                # 결과 로깅 및 실패 원인 분석
+                # 결과 로깅
                 elapsed_time = time.time() - start_time
-                
-                # 연결 실패 시 로그 파일에서 상세 원인 분석
-                if not connection_success and os.path.exists(log_file):
-                    try:
-                        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                            log_content = f.read()
-                            log_lines = log_content.split('\n')
-                            
-                            # 인증 관련 실패 확인
-                            auth_failures = [line for line in log_lines if any(kw in line.lower() for kw in [
-                                'authentication failure', 'authentication reject', 'authentication failed',
-                                'auth failure', 'auth reject', 'auth failed'
-                            ])]
-                            if auth_failures:
-                                logger.error("인증 실패 감지 - USIM 키(opc/k) 또는 IMSI가 올바르지 않을 수 있습니다:")
-                                for line in auth_failures[-3:]:  # 마지막 3개만 출력
-                                    logger.error(f"  {line.strip()[:300]}")
-                            
-                            # 거부 메시지 확인
-                            reject_messages = [line for line in log_lines if 'reject' in line.lower() and any(kw in line.lower() for kw in [
-                                'attach', 'rrc', 'nas', 'security', 'connection'
-                            ])]
-                            if reject_messages:
-                                logger.error("연결 거부 감지:")
-                                for line in reject_messages[-3:]:  # 마지막 3개만 출력
-                                    logger.error(f"  {line.strip()[:300]}")
-                            
-                            # 타임아웃 확인
-                            timeout_messages = [line for line in log_lines if 'timeout' in line.lower()]
-                            if timeout_messages:
-                                logger.warning("타임아웃 감지:")
-                                for line in timeout_messages[-2:]:  # 마지막 2개만 출력
-                                    logger.warning(f"  {line.strip()[:300]}")
-                            
-                            # 셀을 찾지 못했는지 확인
-                            no_cell_found = any('no cell found' in line.lower() or 'could not find any cell' in line.lower() or 'no more frequencies' in line.lower() for line in log_lines)
-                            
-                            if no_cell_found:
-                                logger.error("셀을 찾지 못했습니다!")
-                                logger.error("가능한 원인:")
-                                logger.error("  1. 주파수(EARFCN)가 올바르지 않음 - --earfcn 옵션으로 정확한 주파수 지정 필요")
-                                logger.error("  2. eNB가 해당 주파수에서 송출하지 않음")
-                                logger.error("  3. USRP 장치의 주파수 범위 문제")
-                                logger.error("  4. 신호가 너무 약함 (tx_gain/rx_gain 조정 필요)")
-                            else:
-                                # RRC/NAS 연결 단계 확인
-                                rrc_connected = any('rrc connection setup complete' in line.lower() or 'rrc connected' in line.lower() for line in log_lines)
-                                rrc_attempted = any('rrc connection request' in line.lower() or 'rrc connection setup' in line.lower() for line in log_lines)
-                                nas_attempted = any('attach request' in line.lower() or 'nas message' in line.lower() for line in log_lines)
-                                
-                                if not rrc_attempted:
-                                    logger.error("RRC 연결 시도가 없습니다 - 셀은 찾았지만 연결 요청을 보내지 못했습니다.")
-                                    logger.error("가능한 원인: 주파수/타이밍 문제, USRP 설정 문제, 또는 eNB가 연결을 허용하지 않음")
-                                elif rrc_attempted and not rrc_connected:
-                                    logger.error("RRC 연결 시도는 했지만 완료되지 않았습니다.")
-                                elif rrc_connected and not nas_attempted:
-                                    logger.error("RRC는 연결되었지만 NAS 메시지(Attach Request)를 보내지 못했습니다.")
-                            
-                            # 위의 키워드가 없으면 로그의 마지막 부분 출력 (디버깅용)
-                            if not auth_failures and not reject_messages and not timeout_messages:
-                                logger.warning("상세 실패 원인을 찾지 못했습니다. 로그 파일의 마지막 30줄:")
-                                for line in log_lines[-30:]:
-                                    if line.strip():  # 빈 줄 제외
-                                        logger.warning(f"  {line.strip()[:300]}")
-                    except Exception as e:
-                        logger.error(f"로그 분석 중 오류: {e}")
-                        # 오류 발생 시에도 로그 파일 존재 여부 확인
-                        if os.path.exists(log_file):
-                            logger.warning(f"로그 파일은 존재합니다: {log_file} (크기: {os.path.getsize(log_file)} bytes)")
-                        else:
-                            logger.warning(f"로그 파일이 존재하지 않습니다: {log_file}")
                 
                 if connection_success:
                     logger.info(f"연결 성공 - 다음 핸드폰으로 재시작합니다...")
