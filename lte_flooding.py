@@ -233,7 +233,7 @@ class LTEFlooder:
         config_content = f"""[rf]
 device_name = uhd
 device_args = {self.usrp_args}
-tx_gain = 80
+tx_gain = 90
 rx_gain = 60
 nof_antennas = 1
 
