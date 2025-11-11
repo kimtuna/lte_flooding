@@ -145,7 +145,7 @@ class LTEFlooder:
             # MCC(3) + MNC(2) = 5자리, 나머지 10자리를 unique_id로 채움
             imsi = f"00101{unique_id:010d}"
         
-           config_content = f"""[rf]
+        config_content = f"""[rf]
 device_name = uhd
 device_args = {self.usrp_args}
 tx_gain = 80
