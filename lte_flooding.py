@@ -10,6 +10,7 @@ import time
 import signal
 import sys
 import os
+import re
 from typing import List, Optional
 import argparse
 import logging
@@ -87,6 +88,94 @@ class LTEFlooder:
             raise ValueError("USIM 키가 설정되지 않았습니다. .env 파일을 확인하세요.")
         
         return opc, k
+    
+    def check_usrp_connection(self) -> bool:
+        """USRP 장치 연결 확인"""
+        logger.info("USRP 장치 연결 확인 중...")
+        
+        try:
+            # uhd_find_devices로 장치 확인
+            result = subprocess.run(
+                ["uhd_find_devices"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            # 시리얼 번호 추출
+            serial_match = re.search(r'serial:\s*([^\s,]+)', result.stdout + result.stderr)
+            if serial_match:
+                found_serial = serial_match.group(1)
+                # 사용자가 지정한 시리얼 추출
+                user_serial_match = re.search(r'serial=([^\s"]+)', self.usrp_args)
+                user_serial = user_serial_match.group(1) if user_serial_match else None
+                
+                if user_serial and found_serial.upper() == user_serial.upper():
+                    logger.info(f"✓ USRP 장치 연결 확인됨: serial={found_serial}")
+                    return True
+                elif user_serial:
+                    logger.warning(f"지정한 시리얼({user_serial})과 발견된 시리얼({found_serial})이 다릅니다")
+                    logger.info(f"발견된 장치 사용: serial={found_serial}")
+                    return True
+                else:
+                    # 시리얼이 지정되지 않았으면 첫 번째 장치 사용
+                    logger.info(f"✓ USRP 장치 발견: serial={found_serial}")
+                    return True
+            
+            # srsUE로 직접 확인 시도
+            test_config = self.create_ue_config(0, 0)
+            test_cmd = [
+                "srsue",
+                test_config,
+                "--log.all_level", "error",
+                "--log.filename", "/dev/null"
+            ]
+            
+            test_process = subprocess.Popen(
+                test_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            # 3초 동안 실행하여 연결 확인
+            time.sleep(3)
+            
+            if test_process.poll() is None:
+                # 프로세스가 실행 중이면 연결 성공 가능성
+                test_process.terminate()
+                test_process.wait(timeout=2)
+                logger.info("✓ USRP 장치 연결 확인됨 (srsUE 실행 가능)")
+                # 테스트 config 파일 삭제
+                if os.path.exists(test_config):
+                    os.remove(test_config)
+                return True
+            else:
+                # 프로세스가 종료되었으면 오류 확인
+                _, stderr = test_process.communicate()
+                if "error" in stderr.lower() or "failed" in stderr.lower():
+                    logger.error("✗ USRP 장치 연결 실패")
+                    logger.error(f"오류: {stderr[:200]}")
+                    # 테스트 config 파일 삭제
+                    if os.path.exists(test_config):
+                        os.remove(test_config)
+                    return False
+                else:
+                    logger.info("✓ USRP 장치 연결 확인됨")
+                    # 테스트 config 파일 삭제
+                    if os.path.exists(test_config):
+                        os.remove(test_config)
+                    return True
+                    
+        except subprocess.TimeoutExpired:
+            logger.warning("USRP 확인 시간 초과")
+            return False
+        except FileNotFoundError:
+            logger.error("✗ srsUE를 찾을 수 없습니다. srsRAN이 설치되어 있는지 확인하세요.")
+            return False
+        except Exception as e:
+            logger.warning(f"USRP 확인 중 오류: {e}")
+            return False
         
     def create_ue_config(self, instance_id: int, unique_id: int) -> str:
         """각 인스턴스별 고유한 설정 파일 생성 (재실행마다 새로운 IMSI/IMEI)"""
@@ -292,6 +381,11 @@ imei = 353490069873{unique_id:06d}
         if self.running:
             logger.warning("이미 실행 중입니다.")
             return
+        
+        # USRP 장치 연결 확인
+        if not self.check_usrp_connection():
+            logger.error("USRP 장치 연결을 확인할 수 없습니다. 프로그램을 종료합니다.")
+            raise RuntimeError("USRP 장치 연결 실패")
         
         self.running = True
         target_info = []
