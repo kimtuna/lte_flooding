@@ -308,6 +308,8 @@ imei = 353490069873{unique_id:06d}
                 start_time = time.time()
                 max_wait_time = 30  # 최대 30초 대기 (연결 시도 시간)
                 last_log_check = start_time
+                process_exited_early = False
+                process_stderr = None
                 
                 while process.poll() is None and (time.time() - start_time) < max_wait_time:
                     current_time = time.time()
@@ -350,6 +352,23 @@ imei = 353490069873{unique_id:06d}
                     
                     time.sleep(0.5)  # 0.5초마다 로그 확인
                 
+                # 프로세스가 조기 종료되었는지 확인
+                if process.poll() is not None and (time.time() - start_time) < max_wait_time:
+                    process_exited_early = True
+                    return_code = process.returncode
+                    # stderr 확인 (이미 종료된 프로세스이므로 non-blocking으로 읽기)
+                    try:
+                        # 프로세스가 이미 종료되었으므로 stderr를 읽을 수 있음
+                        if process.stderr:
+                            process_stderr = process.stderr.read()
+                            if process_stderr and len(process_stderr) > 0:
+                                error_msg = process_stderr[:200].decode('utf-8', errors='ignore') if isinstance(process_stderr, bytes) else process_stderr[:200]
+                                if any(keyword in error_msg.lower() for keyword in ['error', 'failed', 'fatal', 'exception']):
+                                    logger.error(f"[인스턴스 {instance_id}] 프로세스가 에러로 종료되었습니다 (종료 코드: {return_code})")
+                                    logger.debug(f"에러 메시지: {error_msg}")
+                    except:
+                        pass
+                
                 # 프로세스가 아직 실행 중이면 종료
                 if process.poll() is None:
                     process.terminate()
@@ -370,6 +389,11 @@ imei = 353490069873{unique_id:06d}
                 elapsed_time = time.time() - start_time
                 if connection_success:
                     logger.info(f"[인스턴스 {instance_id}] 연결 성공 - 재시작합니다...")
+                elif process_exited_early:
+                    if enb_found:
+                        logger.warning(f"[인스턴스 {instance_id}] eNB는 찾았지만 프로세스가 조기 종료되었습니다 (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
+                    else:
+                        logger.warning(f"[인스턴스 {instance_id}] 프로세스가 조기 종료되었습니다 (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                 else:
                     if enb_found:
                         logger.warning(f"[인스턴스 {instance_id}] eNB는 찾았지만 연결에 실패했습니다 (총 소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
