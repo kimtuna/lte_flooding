@@ -307,8 +307,12 @@ imei = 353490069873{unique_id:06d}
                 enb_found = False
                 start_time = time.time()
                 max_wait_time = 30  # 최대 30초 대기 (연결 시도 시간)
+                last_log_check = start_time
                 
                 while process.poll() is None and (time.time() - start_time) < max_wait_time:
+                    current_time = time.time()
+                    elapsed = current_time - start_time
+                    
                     # 로그 파일에서 연결 성공 여부 확인
                     if os.path.exists(log_file):
                         try:
@@ -323,7 +327,7 @@ imei = 353490069873{unique_id:06d}
                                     'cell found'
                                 ]):
                                     enb_found = True
-                                    logger.info(f"[인스턴스 {instance_id}] eNB를 찾았습니다!")
+                                    logger.info(f"[인스턴스 {instance_id}] eNB를 찾았습니다! (소요 시간: {elapsed:.1f}초)")
                                 
                                 # 연결 성공 키워드 확인
                                 if any(keyword in log_content.lower() for keyword in [
@@ -333,14 +337,20 @@ imei = 353490069873{unique_id:06d}
                                     'registered'
                                 ]):
                                     connection_success = True
-                                    logger.info(f"[인스턴스 {instance_id}] 연결 성공했습니다!")
+                                    logger.info(f"[인스턴스 {instance_id}] 연결 성공했습니다! (소요 시간: {elapsed:.1f}초)")
                                     break
                         except:
                             pass
                     
+                    # 5초마다 진행 상황 로그 (너무 많이 출력되지 않도록)
+                    if current_time - last_log_check >= 5.0:
+                        if not enb_found:
+                            logger.debug(f"[인스턴스 {instance_id}] eNB 탐색 중... ({elapsed:.1f}초 경과)")
+                        last_log_check = current_time
+                    
                     time.sleep(0.5)  # 0.5초마다 로그 확인
                 
-                # 연결 성공했거나 타임아웃이면 프로세스 종료
+                # 프로세스가 아직 실행 중이면 종료
                 if process.poll() is None:
                     process.terminate()
                     try:
@@ -359,12 +369,12 @@ imei = 353490069873{unique_id:06d}
                 # 결과 로깅
                 elapsed_time = time.time() - start_time
                 if connection_success:
-                    logger.info(f"[인스턴스 {instance_id}] 연결 성공했습니다! (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
+                    logger.info(f"[인스턴스 {instance_id}] 연결 성공 - 재시작합니다...")
                 else:
                     if enb_found:
-                        logger.warning(f"[인스턴스 {instance_id}] eNB는 찾았지만 연결에 실패했습니다 (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
+                        logger.warning(f"[인스턴스 {instance_id}] eNB는 찾았지만 연결에 실패했습니다 (총 소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                     else:
-                        logger.warning(f"[인스턴스 {instance_id}] eNB를 찾지 못했습니다 (대기 시간: {elapsed_time:.1f}초) - 재시작합니다...")
+                        logger.warning(f"[인스턴스 {instance_id}] eNB를 찾지 못했습니다 (총 대기 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                 
                 if self.running:
                     # interval이 0이면 즉시 재시작, 아니면 지정된 간격만큼 대기
