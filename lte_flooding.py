@@ -203,11 +203,12 @@ class LTEFlooder:
         if self.mnc is not None:
             target_info.append(f"MNC={self.mnc}")
         
-        if target_info:
-            if isinstance(earfcn_value, str):
-                logger.info(f"{', '.join(target_info)}로 설정된 eNB를 찾습니다 (모든 주파수 자동 스캔)")
-            else:
-                logger.info(f"{', '.join(target_info)}로 설정된 eNB를 찾습니다 (주파수: EARFCN {earfcn_value})")
+        # target_info 로그는 한 번만 출력하도록 제거 (너무 많이 출력됨)
+        # if target_info:
+        #     if isinstance(earfcn_value, str):
+        #         logger.info(f"{', '.join(target_info)}로 설정된 eNB를 찾습니다 (모든 주파수 자동 스캔)")
+        #     else:
+        #         logger.info(f"{', '.join(target_info)}로 설정된 eNB를 찾습니다 (주파수: EARFCN {earfcn_value})")
         
         # IMSI 포맷: MCC(3자리) + MNC(2-3자리) + MSIN(나머지, 최대 15자리)
         # unique_id를 사용하여 매번 다른 IMSI 생성
@@ -356,13 +357,14 @@ imei = 353490069873{unique_id:06d}
                         pass
                 
                 # 결과 로깅
+                elapsed_time = time.time() - start_time
                 if connection_success:
-                    logger.info(f"[인스턴스 {instance_id}] 연결 성공 - 재시작합니다...")
+                    logger.info(f"[인스턴스 {instance_id}] 연결 성공했습니다! (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                 else:
                     if enb_found:
-                        logger.warning(f"[인스턴스 {instance_id}] eNB는 찾았지만 연결에 실패했습니다 - 재시작합니다...")
+                        logger.warning(f"[인스턴스 {instance_id}] eNB는 찾았지만 연결에 실패했습니다 (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                     else:
-                        logger.warning(f"[인스턴스 {instance_id}] eNB를 찾지 못했습니다 - 재시작합니다...")
+                        logger.warning(f"[인스턴스 {instance_id}] eNB를 찾지 못했습니다 (대기 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                 
                 if self.running:
                     # interval이 0이면 즉시 재시작, 아니면 지정된 간격만큼 대기
