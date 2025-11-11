@@ -356,18 +356,39 @@ imei = 353490069873{unique_id:06d}
                 if process.poll() is not None and (time.time() - start_time) < max_wait_time:
                     process_exited_early = True
                     return_code = process.returncode
-                    # stderr 확인 (이미 종료된 프로세스이므로 non-blocking으로 읽기)
-                    try:
-                        # 프로세스가 이미 종료되었으므로 stderr를 읽을 수 있음
-                        if process.stderr:
-                            process_stderr = process.stderr.read()
-                            if process_stderr and len(process_stderr) > 0:
-                                error_msg = process_stderr[:200].decode('utf-8', errors='ignore') if isinstance(process_stderr, bytes) else process_stderr[:200]
-                                if any(keyword in error_msg.lower() for keyword in ['error', 'failed', 'fatal', 'exception']):
-                                    logger.error(f"[인스턴스 {instance_id}] 프로세스가 에러로 종료되었습니다 (종료 코드: {return_code})")
-                                    logger.debug(f"에러 메시지: {error_msg}")
-                    except:
-                        pass
+                    
+                    # 로그 파일에서 에러 메시지 확인
+                    error_found = False
+                    if os.path.exists(log_file):
+                        try:
+                            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                log_lines = f.readlines()
+                                # 마지막 몇 줄에서 에러 확인
+                                for line in log_lines[-10:]:
+                                    line_lower = line.lower()
+                                    if any(keyword in line_lower for keyword in ['error', 'failed', 'fatal', 'exception', 'could not', 'unable to']):
+                                        error_found = True
+                                        logger.error(f"[인스턴스 {instance_id}] 프로세스가 에러로 종료되었습니다 (종료 코드: {return_code})")
+                                        logger.error(f"에러 메시지: {line.strip()[:200]}")
+                                        break
+                        except:
+                            pass
+                    
+                    # stderr 확인 (프로세스가 이미 종료되었으므로 읽기 가능)
+                    if not error_found:
+                        try:
+                            if process.stderr:
+                                # 프로세스가 종료되었으므로 stderr 읽기 시도
+                                process.stderr.seek(0)
+                                process_stderr = process.stderr.read()
+                                if process_stderr and len(process_stderr) > 0:
+                                    error_msg = process_stderr[:300].decode('utf-8', errors='ignore') if isinstance(process_stderr, bytes) else process_stderr[:300]
+                                    if any(keyword in error_msg.lower() for keyword in ['error', 'failed', 'fatal', 'exception']):
+                                        logger.error(f"[인스턴스 {instance_id}] 프로세스가 에러로 종료되었습니다 (종료 코드: {return_code})")
+                                        logger.error(f"에러 메시지: {error_msg.strip()}")
+                        except (AttributeError, OSError, ValueError):
+                            # stderr가 읽을 수 없는 경우 (이미 닫혔거나 seek 불가능)
+                            pass
                 
                 # 프로세스가 아직 실행 중이면 종료
                 if process.poll() is None:
