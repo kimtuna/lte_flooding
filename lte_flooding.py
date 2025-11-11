@@ -309,26 +309,64 @@ imei = 353490069873{unique_id:06d}
                             with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                                 log_content = f.read()
                                 
-                                # eNB 찾았는지 확인
-                                if not enb_found and any(keyword in log_content.lower() for keyword in [
-                                    'found cell',
+                                # eNB 찾았는지 확인 (셀 탐색 단계)
+                                # "No cell found" 같은 부정 메시지가 없고, 실제로 셀을 찾았는지 확인
+                                no_cell_found = any(keyword in log_content.lower() for keyword in [
+                                    'no cell found',
+                                    'could not find any cell',
+                                    'no more frequencies',
+                                    'cell search: no cell'
+                                ])
+                                
+                                # 실제로 셀을 찾았는지 확인 (더 구체적인 키워드)
+                                cell_found_positive = any(keyword in log_content.lower() for keyword in [
                                     'found plmn',
-                                    'detected cell',
-                                    'cell found'
-                                ]):
+                                    'cell found with pci',
+                                    'detected cell with pci',
+                                    'synchronized to cell'
+                                ])
+                                
+                                if not enb_found and cell_found_positive and not no_cell_found:
                                     enb_found = True
-                                    logger.info(f"eNB를 찾았습니다! (소요 시간: {elapsed:.1f}초)")
+                                    logger.info(f"셀을 찾았습니다! (소요 시간: {elapsed:.1f}초)")
+                                elif not enb_found and no_cell_found:
+                                    # 셀을 찾지 못했다는 명확한 메시지
+                                    logger.warning(f"셀을 찾지 못했습니다 (소요 시간: {elapsed:.1f}초) - 주파수 스캔 중...")
+                                
+                                # RRC 연결 시도 확인
+                                rrc_attempted = any(keyword in log_content.lower() for keyword in [
+                                    'rrc connection request',
+                                    'rrc connection setup',
+                                    'sending rrc',
+                                    'rrc connection'
+                                ])
+                                
+                                # NAS 메시지 확인
+                                nas_attempted = any(keyword in log_content.lower() for keyword in [
+                                    'attach request',
+                                    'nas message',
+                                    'sending nas'
+                                ])
                                 
                                 # 연결 성공 키워드 확인
                                 if any(keyword in log_content.lower() for keyword in [
                                     'rrc connection setup complete',
                                     'rrc connected',
                                     'attached',
-                                    'registered'
+                                    'registered',
+                                    'attach accept'
                                 ]):
                                     connection_success = True
                                     logger.info(f"연결 성공했습니다! (소요 시간: {elapsed:.1f}초)")
                                     break
+                                
+                                # 진행 상황 로깅 (10초마다)
+                                if current_time - last_log_check >= 10.0:
+                                    if enb_found and not rrc_attempted:
+                                        logger.warning(f"셀은 찾았지만 RRC 연결 시도가 없습니다... ({elapsed:.1f}초 경과)")
+                                    elif rrc_attempted and not nas_attempted:
+                                        logger.warning(f"RRC 연결은 시도했지만 NAS 메시지가 없습니다... ({elapsed:.1f}초 경과)")
+                                    last_log_check = current_time
                                 
                                 # 연결 실패 원인 확인 (인증 실패, 거부 등)
                                 failure_keywords = [
@@ -464,10 +502,34 @@ imei = 353490069873{unique_id:06d}
                                 for line in timeout_messages[-2:]:  # 마지막 2개만 출력
                                     logger.warning(f"  {line.strip()[:300]}")
                             
+                            # 셀을 찾지 못했는지 확인
+                            no_cell_found = any('no cell found' in line.lower() or 'could not find any cell' in line.lower() or 'no more frequencies' in line.lower() for line in log_lines)
+                            
+                            if no_cell_found:
+                                logger.error("셀을 찾지 못했습니다!")
+                                logger.error("가능한 원인:")
+                                logger.error("  1. 주파수(EARFCN)가 올바르지 않음 - --earfcn 옵션으로 정확한 주파수 지정 필요")
+                                logger.error("  2. eNB가 해당 주파수에서 송출하지 않음")
+                                logger.error("  3. USRP 장치의 주파수 범위 문제")
+                                logger.error("  4. 신호가 너무 약함 (tx_gain/rx_gain 조정 필요)")
+                            else:
+                                # RRC/NAS 연결 단계 확인
+                                rrc_connected = any('rrc connection setup complete' in line.lower() or 'rrc connected' in line.lower() for line in log_lines)
+                                rrc_attempted = any('rrc connection request' in line.lower() or 'rrc connection setup' in line.lower() for line in log_lines)
+                                nas_attempted = any('attach request' in line.lower() or 'nas message' in line.lower() for line in log_lines)
+                                
+                                if not rrc_attempted:
+                                    logger.error("RRC 연결 시도가 없습니다 - 셀은 찾았지만 연결 요청을 보내지 못했습니다.")
+                                    logger.error("가능한 원인: 주파수/타이밍 문제, USRP 설정 문제, 또는 eNB가 연결을 허용하지 않음")
+                                elif rrc_attempted and not rrc_connected:
+                                    logger.error("RRC 연결 시도는 했지만 완료되지 않았습니다.")
+                                elif rrc_connected and not nas_attempted:
+                                    logger.error("RRC는 연결되었지만 NAS 메시지(Attach Request)를 보내지 못했습니다.")
+                            
                             # 위의 키워드가 없으면 로그의 마지막 부분 출력 (디버깅용)
                             if not auth_failures and not reject_messages and not timeout_messages:
-                                logger.warning("상세 실패 원인을 찾지 못했습니다. 로그 파일의 마지막 20줄:")
-                                for line in log_lines[-20:]:
+                                logger.warning("상세 실패 원인을 찾지 못했습니다. 로그 파일의 마지막 30줄:")
+                                for line in log_lines[-30:]:
                                     if line.strip():  # 빈 줄 제외
                                         logger.warning(f"  {line.strip()[:300]}")
                     except Exception as e:
