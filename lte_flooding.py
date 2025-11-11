@@ -188,7 +188,7 @@ imei = 353490069873{unique_id:06d}
             config_path = self.create_ue_config(instance_id, unique_id)
             
             try:
-                logger.info(f"UE 인스턴스 {instance_id} 시작 중...")
+                logger.info(f"[인스턴스 {instance_id}] 시작 중... (시도 {attempt_count})")
                 cmd = [
                     "srsue",
                     config_path,
@@ -214,6 +214,7 @@ imei = 353490069873{unique_id:06d}
                 
                 # 연결 성공 감지를 위한 로그 모니터링
                 connection_success = False
+                enb_found = False
                 start_time = time.time()
                 max_wait_time = 30  # 최대 30초 대기 (연결 시도 시간)
                 
@@ -223,6 +224,17 @@ imei = 353490069873{unique_id:06d}
                         try:
                             with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                                 log_content = f.read()
+                                
+                                # eNB 찾았는지 확인
+                                if not enb_found and any(keyword in log_content.lower() for keyword in [
+                                    'found cell',
+                                    'found plmn',
+                                    'detected cell',
+                                    'cell found'
+                                ]):
+                                    enb_found = True
+                                    logger.info(f"[인스턴스 {instance_id}] eNB를 찾았습니다!")
+                                
                                 # 연결 성공 키워드 확인
                                 if any(keyword in log_content.lower() for keyword in [
                                     'rrc connection setup complete',
@@ -231,7 +243,7 @@ imei = 353490069873{unique_id:06d}
                                     'registered'
                                 ]):
                                     connection_success = True
-                                    logger.info(f"UE 인스턴스 {instance_id} 연결 성공 - 즉시 재시작")
+                                    logger.info(f"[인스턴스 {instance_id}] 연결 성공했습니다!")
                                     break
                         except:
                             pass
@@ -247,9 +259,14 @@ imei = 353490069873{unique_id:06d}
                         process.kill()
                         process.wait()
                 
-                # 프로세스가 이미 종료된 경우
-                if process.poll() is not None:
-                    pass
+                # 결과 로깅
+                if connection_success:
+                    logger.info(f"[인스턴스 {instance_id}] 연결 성공 - 재시작합니다...")
+                else:
+                    if enb_found:
+                        logger.warning(f"[인스턴스 {instance_id}] eNB는 찾았지만 연결에 실패했습니다 - 재시작합니다...")
+                    else:
+                        logger.warning(f"[인스턴스 {instance_id}] eNB를 찾지 못했습니다 - 재시작합니다...")
                 
                 if self.running:
                     # interval이 0이면 즉시 재시작, 아니면 지정된 간격만큼 대기
