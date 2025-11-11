@@ -28,14 +28,9 @@ PLMN만 지정하면 srsUE가 자동으로 모든 주파수를 스캔하여 해�
 python3 lte_flooding.py --usrp-args "serial=YOUR_USRP_SERIAL" --mcc 123 --mnc 456 --earfcn 3400
 ```
 
-주파수를 지정하면 더 빠르게 연결 시도가 가능합니다.
-
-### 기타 옵션
+### 연결 시도 간격 조정
 
 ```bash
-# 인스턴스 수 조정 (기본값: 10)
-python3 lte_flooding.py --usrp-args "serial=YOUR_USRP_SERIAL" --mcc 123 --mnc 456 --instances 20
-
 # 연결 시도 간격 조정 (기본값: 0.1초)
 python3 lte_flooding.py --usrp-args "serial=YOUR_USRP_SERIAL" --mcc 123 --mnc 456 --interval 0.05
 ```
@@ -46,7 +41,10 @@ python3 lte_flooding.py --usrp-args "serial=YOUR_USRP_SERIAL" --mcc 123 --mnc 45
 - `--mcc`: Mobile Country Code (필수, 예: 123)
 - `--mnc`: Mobile Network Code (필수, 예: 456)
 - `--earfcn`: 주파수 채널 번호 (선택, 지정하지 않으면 자동 스캔)
-- `--instances`: 동시 실행할 srsUE 인스턴스 수 (기본값: 10)
 - `--interval`: 연결 시도 간격(초) (기본값: 0.1)
+
+## 동작 방식
+
+스크립트는 매번 다른 IMSI/IMEI를 생성하여 연결 시도를 반복합니다. 각 시도마다 새로운 "핸드폰"처럼 보이도록 고유한 식별자를 사용합니다.
 
 
