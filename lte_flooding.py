@@ -259,6 +259,13 @@ imei = 353490069873{unique_id:06d}
                         process.kill()
                         process.wait()
                 
+                # 프로세스 종료 후 config 파일 삭제
+                if os.path.exists(config_path):
+                    try:
+                        os.remove(config_path)
+                    except:
+                        pass
+                
                 # 결과 로깅
                 if connection_success:
                     logger.info(f"[인스턴스 {instance_id}] 연결 성공 - 재시작합니다...")
@@ -359,14 +366,14 @@ imei = 353490069873{unique_id:06d}
         
         self.processes.clear()
         
-        # 임시 설정 파일 정리
-        for i in range(self.num_instances):
-            config_path = f"srsue_{i}.conf"
-            if os.path.exists(config_path):
-                try:
-                    os.remove(config_path)
-                except:
-                    pass
+        # 임시 설정 파일 정리 (모든 인스턴스의 config 파일 삭제)
+        import glob
+        config_pattern = "srsue_*.conf"
+        for config_path in glob.glob(config_pattern):
+            try:
+                os.remove(config_path)
+            except:
+                pass
         
         logger.info("LTE Flooding이 중지되었습니다.")
 
