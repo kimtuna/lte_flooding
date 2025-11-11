@@ -329,6 +329,29 @@ imei = 353490069873{unique_id:06d}
                                     connection_success = True
                                     logger.info(f"연결 성공했습니다! (소요 시간: {elapsed:.1f}초)")
                                     break
+                                
+                                # 연결 실패 원인 확인 (인증 실패, 거부 등)
+                                failure_keywords = [
+                                    'authentication failure',
+                                    'authentication reject',
+                                    'attach reject',
+                                    'security mode reject',
+                                    'rrc connection reject',
+                                    'rrc connection reestablishment reject',
+                                    'nas reject',
+                                    'reject',
+                                    'authentication failed',
+                                    'security mode command failed'
+                                ]
+                                for keyword in failure_keywords:
+                                    if keyword in log_content.lower():
+                                        # 실패 원인 로그 출력
+                                        lines = log_content.split('\n')
+                                        for line in lines:
+                                            if keyword in line.lower():
+                                                logger.warning(f"연결 실패 원인 감지: {line.strip()[:200]}")
+                                                break
+                                        break
                         except:
                             pass
                     
@@ -351,13 +374,24 @@ imei = 353490069873{unique_id:06d}
                         try:
                             with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                                 log_lines = f.readlines()
-                                # 마지막 몇 줄에서 에러 확인
-                                for line in log_lines[-10:]:
+                                # 마지막 30줄에서 에러 확인 (더 많은 컨텍스트)
+                                for line in log_lines[-30:]:
                                     line_lower = line.lower()
-                                    if any(keyword in line_lower for keyword in ['error', 'failed', 'fatal', 'exception', 'could not', 'unable to']):
+                                    if any(keyword in line_lower for keyword in [
+                                        'error', 'failed', 'fatal', 'exception', 'could not', 'unable to',
+                                        'authentication failure', 'authentication reject', 'attach reject',
+                                        'security mode reject', 'rrc connection reject', 'nas reject',
+                                        'reject', 'authentication failed'
+                                    ]):
                                         error_found = True
                                         logger.error(f"프로세스가 에러로 종료되었습니다 (종료 코드: {return_code})")
-                                        logger.error(f"에러 메시지: {line.strip()[:200]}")
+                                        logger.error(f"에러 메시지: {line.strip()[:300]}")
+                                        # 추가 컨텍스트 출력 (이전/다음 줄)
+                                        line_idx = log_lines.index(line)
+                                        if line_idx > 0:
+                                            logger.error(f"이전 컨텍스트: {log_lines[line_idx-1].strip()[:200]}")
+                                        if line_idx < len(log_lines) - 1:
+                                            logger.error(f"다음 컨텍스트: {log_lines[line_idx+1].strip()[:200]}")
                                         break
                         except:
                             pass
@@ -394,8 +428,43 @@ imei = 353490069873{unique_id:06d}
                     except:
                         pass
                 
-                # 결과 로깅
+                # 결과 로깅 및 실패 원인 분석
                 elapsed_time = time.time() - start_time
+                
+                # 연결 실패 시 로그 파일에서 상세 원인 분석
+                if not connection_success and os.path.exists(log_file):
+                    try:
+                        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            log_content = f.read()
+                            log_lines = log_content.split('\n')
+                            
+                            # 인증 관련 실패 확인
+                            auth_failures = [line for line in log_lines if any(kw in line.lower() for kw in [
+                                'authentication failure', 'authentication reject', 'authentication failed'
+                            ])]
+                            if auth_failures:
+                                logger.error("인증 실패 감지 - USIM 키(opc/k) 또는 IMSI가 올바르지 않을 수 있습니다:")
+                                for line in auth_failures[-3:]:  # 마지막 3개만 출력
+                                    logger.error(f"  {line.strip()[:300]}")
+                            
+                            # 거부 메시지 확인
+                            reject_messages = [line for line in log_lines if 'reject' in line.lower() and any(kw in line.lower() for kw in [
+                                'attach', 'rrc', 'nas', 'security'
+                            ])]
+                            if reject_messages:
+                                logger.error("연결 거부 감지:")
+                                for line in reject_messages[-3:]:  # 마지막 3개만 출력
+                                    logger.error(f"  {line.strip()[:300]}")
+                            
+                            # 타임아웃 확인
+                            timeout_messages = [line for line in log_lines if 'timeout' in line.lower()]
+                            if timeout_messages:
+                                logger.warning("타임아웃 감지:")
+                                for line in timeout_messages[-2:]:  # 마지막 2개만 출력
+                                    logger.warning(f"  {line.strip()[:300]}")
+                    except Exception as e:
+                        logger.debug(f"로그 분석 중 오류: {e}")
+                
                 if connection_success:
                     logger.info(f"연결 성공 - 다음 핸드폰으로 재시작합니다...")
                 elif process_exited_early:
