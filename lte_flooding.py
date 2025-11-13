@@ -314,75 +314,81 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     current_time = time.time()
                     elapsed = current_time - start_time
                     
-                    # 로그 파일에서 연결 성공 여부 확인
+                    # 로그 파일에서 연결 성공 여부 확인 (연결 성공 후에는 최소한만 체크)
                     if os.path.exists(log_file):
                         try:
                             with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                                 log_content = f.read()
-                                
-                                # eNB 찾았는지 확인 (셀 탐색 단계)
-                                # "No cell found" 같은 부정 메시지가 없고, 실제로 셀을 찾았는지 확인
-                                no_cell_found = any(keyword in log_content.lower() for keyword in [
-                                    'no cell found',
-                                    'could not find any cell',
-                                    'no more frequencies',
-                                    'cell search: no cell'
-                                ])
-                                
-                                # 실제로 셀을 찾았는지 확인 (더 구체적인 키워드)
-                                cell_found_positive = any(keyword in log_content.lower() for keyword in [
-                                    'found plmn',
-                                    'found cell',  # "Found Cell:" 메시지
-                                    'cell found with pci',
-                                    'detected cell with pci',
-                                    'synchronized to cell',
-                                    'rrc connection request',  # RRC 요청을 보냈다면 셀을 찾은 것
-                                    'connection request',  # 연결 요청을 보냈다면 셀을 찾은 것
-                                    'sending rrc',
-                                    'rrc connection setup',
-                                    'random access',  # Random Access 시도 = 셀을 찾은 것
-                                    'rach',  # RACH 요청 = 셀을 찾은 것
-                                    'rrc connected',  # RRC 연결 성공
-                                    'attaching ue'  # UE 연결 시도 중
-                                ])
-                                
-                                if not enb_found and cell_found_positive and not no_cell_found:
-                                    enb_found = True
-                                    logger.info(f"셀을 찾았습니다! (소요 시간: {elapsed:.1f}초)")
-                                elif not enb_found and no_cell_found:
-                                    # 셀을 찾지 못했다는 명확한 메시지 (너무 자주 출력하지 않도록)
-                                    if elapsed % 5.0 < 0.5:  # 5초마다 한 번만 출력
-                                        logger.warning(f"셀을 찾지 못했습니다 (소요 시간: {elapsed:.1f}초) - 주파수 스캔 중...")
-                                
-                                # RRC 연결 시도 확인
-                                rrc_attempted = any(keyword in log_content.lower() for keyword in [
-                                    'rrc connection request',
-                                    'rrc connection setup',
-                                    'sending rrc',
-                                    'rrc connection'
-                                ])
-                                
-                                # NAS 메시지 확인
-                                nas_attempted = any(keyword in log_content.lower() for keyword in [
-                                    'attach request',
-                                    'nas message',
-                                    'sending nas'
-                                ])
-                                
-                                # 연결 성공 키워드 확인 (연결 성공 후 계속 유지하여 패킷 전송)
-                                if any(keyword in log_content.lower() for keyword in [
-                                    'rrc connection setup complete',
-                                    'rrc connected',
-                                    'random access complete',  # RACH 성공 = 연결 시도 성공
-                                    'attached',
-                                    'registered',
-                                    'attach accept'
-                                ]):
-                                    if not connection_success:
-                                        connection_success = True
-                                        logger.info(f"연결 성공했습니다! 연결을 유지하며 패킷을 계속 전송합니다. (소요 시간: {elapsed:.1f}초)")
-                                    # 연결 성공 후 종료하지 않고 계속 실행 (연결 유지)
-                                    # 프로세스는 계속 실행되어 패킷을 보냄
+                            
+                            # 연결 성공 후에는 로그 체크를 최소화 (프로세스 상태만 확인)
+                            if connection_success:
+                                # 연결 성공 후에는 추가 로그 체크 없이 계속 실행
+                                time.sleep(1)  # 1초 대기 후 다시 체크
+                                continue
+                            
+                            # eNB 찾았는지 확인 (셀 탐색 단계) - 연결 성공 전에만 실행
+                            # "No cell found" 같은 부정 메시지가 없고, 실제로 셀을 찾았는지 확인
+                            no_cell_found = any(keyword in log_content.lower() for keyword in [
+                                'no cell found',
+                                'could not find any cell',
+                                'no more frequencies',
+                                'cell search: no cell'
+                            ])
+                            
+                            # 실제로 셀을 찾았는지 확인 (더 구체적인 키워드)
+                            cell_found_positive = any(keyword in log_content.lower() for keyword in [
+                                'found plmn',
+                                'found cell',  # "Found Cell:" 메시지
+                                'cell found with pci',
+                                'detected cell with pci',
+                                'synchronized to cell',
+                                'rrc connection request',  # RRC 요청을 보냈다면 셀을 찾은 것
+                                'connection request',  # 연결 요청을 보냈다면 셀을 찾은 것
+                                'sending rrc',
+                                'rrc connection setup',
+                                'random access',  # Random Access 시도 = 셀을 찾은 것
+                                'rach',  # RACH 요청 = 셀을 찾은 것
+                                'rrc connected',  # RRC 연결 성공
+                                'attaching ue'  # UE 연결 시도 중
+                            ])
+                            
+                            if not enb_found and cell_found_positive and not no_cell_found:
+                                enb_found = True
+                                logger.info(f"셀을 찾았습니다! (소요 시간: {elapsed:.1f}초)")
+                            elif not enb_found and no_cell_found and not connection_success:
+                                # 셀을 찾지 못했다는 명확한 메시지 (연결 성공 전에만 출력)
+                                if elapsed % 5.0 < 0.5:  # 5초마다 한 번만 출력
+                                    logger.warning(f"셀을 찾지 못했습니다 (소요 시간: {elapsed:.1f}초) - 주파수 스캔 중...")
+                            
+                            # RRC 연결 시도 확인
+                            rrc_attempted = any(keyword in log_content.lower() for keyword in [
+                                'rrc connection request',
+                                'rrc connection setup',
+                                'sending rrc',
+                                'rrc connection'
+                            ])
+                            
+                            # NAS 메시지 확인
+                            nas_attempted = any(keyword in log_content.lower() for keyword in [
+                                'attach request',
+                                'nas message',
+                                'sending nas'
+                            ])
+                            
+                            # 연결 성공 키워드 확인 (연결 성공 후 계속 유지하여 패킷 전송)
+                            if any(keyword in log_content.lower() for keyword in [
+                                'rrc connection setup complete',
+                                'rrc connected',
+                                'random access complete',  # RACH 성공 = 연결 시도 성공
+                                'attached',
+                                'registered',
+                                'attach accept'
+                            ]):
+                                if not connection_success:
+                                    connection_success = True
+                                    logger.info(f"연결 성공했습니다! 연결을 유지하며 패킷을 계속 전송합니다. (소요 시간: {elapsed:.1f}초)")
+                                # 연결 성공 후 종료하지 않고 계속 실행 (연결 유지)
+                                # 프로세스는 계속 실행되어 패킷을 보냄
                                 
                                 
                         except:
