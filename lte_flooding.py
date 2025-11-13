@@ -326,13 +326,18 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                                 # 실제로 셀을 찾았는지 확인 (더 구체적인 키워드)
                                 cell_found_positive = any(keyword in log_content.lower() for keyword in [
                                     'found plmn',
+                                    'found cell',  # "Found Cell:" 메시지
                                     'cell found with pci',
                                     'detected cell with pci',
                                     'synchronized to cell',
                                     'rrc connection request',  # RRC 요청을 보냈다면 셀을 찾은 것
                                     'connection request',  # 연결 요청을 보냈다면 셀을 찾은 것
                                     'sending rrc',
-                                    'rrc connection setup'
+                                    'rrc connection setup',
+                                    'random access',  # Random Access 시도 = 셀을 찾은 것
+                                    'rach',  # RACH 요청 = 셀을 찾은 것
+                                    'rrc connected',  # RRC 연결 성공
+                                    'attaching ue'  # UE 연결 시도 중
                                 ])
                                 
                                 if not enb_found and cell_found_positive and not no_cell_found:
@@ -358,10 +363,12 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                                     'sending nas'
                                 ])
                                 
-                                # 연결 성공 키워드 확인
+                                # 연결 성공 키워드 확인 (RRC 연결만 성공해도 충분 - flooding 목적)
                                 if any(keyword in log_content.lower() for keyword in [
                                     'rrc connection setup complete',
                                     'rrc connected',
+                                    'random access complete',  # RACH 성공 = 연결 시도 성공
+                                    'random access transmission',  # RACH 전송 시작 = 연결 시도
                                     'attached',
                                     'registered',
                                     'attach accept'
