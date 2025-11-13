@@ -249,6 +249,11 @@ opc  = {self.usim_opc}
 k    = {self.usim_k}
 imsi = {imsi}
 imei = 353490069873{unique_id:06d}
+
+[pcap]
+enable = true
+mac_filename = /tmp/srsue_{unique_id}_mac.pcap
+nas_filename = /tmp/srsue_{unique_id}_nas.pcap
 """
         config_path = f"srsue_{unique_id}.conf"
         with open(config_path, 'w') as f:
@@ -363,6 +368,14 @@ imei = 353490069873{unique_id:06d}
                                 ]):
                                     connection_success = True
                                     logger.info(f"연결 성공했습니다! (소요 시간: {elapsed:.1f}초)")
+                                    # 연결 성공 시 즉시 프로세스 종료
+                                    if process.poll() is None:
+                                        process.terminate()
+                                        try:
+                                            process.wait(timeout=1)
+                                        except subprocess.TimeoutExpired:
+                                            process.kill()
+                                            process.wait()
                                     break
                                 
                                 
