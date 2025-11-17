@@ -477,9 +477,20 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         max_wait_time = 60  # 최대 60초 대기
         
         # eNB 찾기 대기
+        last_log_size = 0
         while self.running and not enb_found and (time.time() - start_time) < max_wait_time:
             if scout_process.poll() is not None:
-                # 프로세스가 종료됨
+                # 프로세스가 종료됨 - 오류 확인
+                return_code = scout_process.returncode
+                logger.warning(f"스카우트 프로세스가 종료되었습니다 (종료 코드: {return_code})")
+                
+                # stderr 확인
+                try:
+                    _, stderr = scout_process.communicate()
+                    if stderr:
+                        logger.error(f"스카우트 프로세스 오류: {stderr[:500]}")
+                except:
+                    pass
                 break
             
             if os.path.exists(scout_log):
@@ -487,24 +498,50 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     with open(scout_log, 'r', encoding='utf-8', errors='ignore') as f:
                         log_content = f.read()
                     
-                    # eNB 찾았는지 확인
+                    # 로그가 업데이트되었는지 확인
+                    current_log_size = len(log_content)
+                    if current_log_size > last_log_size:
+                        last_log_size = current_log_size
+                        # 마지막 10줄 출력 (디버깅)
+                        log_lines = log_content.split('\n')
+                        if len(log_lines) > 10:
+                            logger.debug(f"최근 로그: {log_lines[-10:]}")
+                    
+                    # eNB 찾았는지 확인 (더 많은 키워드 추가)
                     cell_found = any(keyword in log_content.lower() for keyword in [
                         'found plmn',
                         'found cell',
                         'cell found with pci',
                         'detected cell with pci',
                         'synchronized to cell',
+                        'synchronized',
                         'rrc connection request',
                         'random access',
-                        'rach'
+                        'rach',
+                        'plmn',
+                        'pci',
+                        'cell search',
+                        'cell found',
+                        'found plmn id',
+                        'attaching',
+                        'attach request'
                     ])
                     
                     if cell_found:
                         enb_found = True
                         logger.info("✓ eNB를 찾았습니다! 모든 config 파일로 순차 공격 시작...")
+                        # 찾은 셀 정보 출력
+                        for line in log_content.split('\n'):
+                            if any(keyword in line.lower() for keyword in ['plmn', 'pci', 'cell', 'found']):
+                                logger.info(f"셀 정보: {line[:200]}")
                         break
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"로그 파일 읽기 오류: {e}")
+            else:
+                # 로그 파일이 아직 생성되지 않음
+                elapsed = time.time() - start_time
+                if elapsed > 5 and elapsed % 5 < 0.5:  # 5초마다 한 번만 출력
+                    logger.debug(f"로그 파일 대기 중... ({elapsed:.1f}초 경과)")
             
             time.sleep(0.5)
         
