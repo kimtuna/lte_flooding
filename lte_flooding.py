@@ -50,6 +50,7 @@ class LTEFlooder:
         self.instances = instances
         self.use_configs = use_configs
         self.processes: list[Optional[subprocess.Popen]] = []  # 여러 프로세스 관리
+        self.process: Optional[subprocess.Popen] = None  # 단일 프로세스 (일부 모드에서 사용)
         self.running = False
         
         # .env 파일에서 USIM 키 로드
@@ -123,7 +124,7 @@ class LTEFlooder:
                     return True
             
             # srsUE로 직접 확인 시도
-            test_config = self.create_ue_config(0, 0)
+            test_config = self.create_ue_config(0)
             test_cmd = [
                 "srsue",
                 test_config,
