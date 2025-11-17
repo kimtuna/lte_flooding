@@ -222,9 +222,9 @@ class LTEFlooder:
             # MCC(3) + MNC(2) = 5자리, 나머지 10자리를 unique_id로 채움
             imsi = f"00101{unique_id:010d}"
         
+        # device_args는 config 파일에 넣지 않고 명령어 옵션으로 전달
         config_content = f"""[rf]
 device_name = uhd
-device_args = {self.usrp_args}
 tx_gain = 90
 rx_gain = 60
 nof_antennas = 1
@@ -309,14 +309,10 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         else:
             imsi = f"00101{unique_id:010d}"
         
-        # device_args 설정 (선택사항)
-        device_args_line = ""
-        if self.usrp_args:
-            device_args_line = f"device_args = {self.usrp_args}\n"
-        
-        config_content = f"""[rf]
+        # device_args는 config 파일에 넣지 않고 명령어 옵션으로 전달
+        config_content = f""[rf]
 device_name = uhd
-{device_args_line}tx_gain = 90
+tx_gain = 90
 rx_gain = 60
 nof_antennas = 1
 
@@ -406,7 +402,7 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             pass
         return values
     
-    def run_srsue_with_config(self, config_path: str, log_file: str = None) -> subprocess.Popen:
+    def run_srsue_with_config(self, config_path: str, log_file: str = None, usrp_args: str = None) -> subprocess.Popen:
         """단일 config 파일로 srsue 실행"""
         # config 파일 경로를 절대 경로로 변환
         if not os.path.isabs(config_path):
@@ -419,7 +415,12 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config 파일을 찾을 수 없습니다: {config_path}")
         
-        logger.debug(f"srsue 실행: config={config_path}, log={log_file}")
+        # config 파일에서 device_args 읽기 (없으면 usrp_args 파라미터 사용)
+        device_args = usrp_args
+        if device_args is None:
+            device_args = self.get_usrp_args_from_config(config_path)
+        
+        logger.debug(f"srsue 실행: config={config_path}, log={log_file}, device_args={device_args}")
         
         cmd = [
             "srsue",
@@ -427,6 +428,10 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             "--log.filename", log_file,
             "--log.all_level", "info"
         ]
+        
+        # device_args를 명령어 옵션으로 추가
+        if device_args:
+            cmd.extend(["--rf.device_args", device_args])
         
         kwargs = {
             'stdout': subprocess.PIPE,
@@ -468,7 +473,9 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             pass
         
         scout_log = "/tmp/srsue_scout.log"
-        scout_process = self.run_srsue_with_config(scout_config_file, scout_log)
+        # usrp_args 전달 (config 파일에서 읽은 값 또는 기본값)
+        scout_usrp_args = usrp_args_from_config or self.usrp_args
+        scout_process = self.run_srsue_with_config(scout_config_file, scout_log, scout_usrp_args)
         
         enb_found = False
         start_time = time.time()
@@ -610,7 +617,8 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     log_file = f"/tmp/srsue_{os.path.basename(config_path)}.log"
                     
                     try:
-                        current_process = self.run_srsue_with_config(config_path, log_file)
+                        # usrp_args 전달 (스카우트에서 사용한 것과 동일)
+                        current_process = self.run_srsue_with_config(config_path, log_file, scout_usrp_args)
                         config_index += 1
                         logger.debug(f"Config 실행: {os.path.basename(config_path)} ({config_index}/{len(config_files)})")
                     except Exception as e:
