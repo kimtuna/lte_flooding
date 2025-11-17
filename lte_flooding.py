@@ -534,7 +534,11 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         'rach',
                         'attach request',
                         'sending rrc',
-                        'rrc connected'
+                        'rrc connected',
+                        'found peak',  # CELL SEARCH에서 셀을 찾았을 때
+                        'cell_id:',  # Cell ID 발견
+                        'found peak psr',  # PSR peak 발견
+                        'cell search: ['  # CELL SEARCH 결과 (예: [3/6/4])
                     ])
                     
                     # 부정적인 키워드가 없고 긍정적인 키워드가 있으면 셀을 찾은 것
