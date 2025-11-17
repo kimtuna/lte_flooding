@@ -477,6 +477,13 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             pass
         
         scout_log = "/tmp/srsue_scout.log"
+        # 이전 로그 파일 삭제 (오래된 내용으로 인한 오탐지 방지)
+        if os.path.exists(scout_log):
+            try:
+                os.remove(scout_log)
+            except:
+                pass
+        
         # usrp_args 전달 (config 파일에서 읽은 값 또는 기본값)
         scout_usrp_args = usrp_args_from_config or self.usrp_args
         scout_process = self.run_srsue_with_config(scout_config_file, scout_log, scout_usrp_args)
@@ -523,14 +530,16 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                                         logger.info(f"  {line[:150]}")
                     
                     # eNB 찾았는지 확인 (실제로 셀을 찾았을 때만 매칭)
-                    # 부정적인 키워드 확인 (셀을 찾지 못했다는 메시지)
+                    # 부정적인 키워드 확인 (셀을 찾지 못했거나 연결 실패)
                     no_cell_found = any(keyword in log_content.lower() for keyword in [
                         'could not find any cell',
                         'no cell found',
                         'no more frequencies',
                         'did not find any plmn',
                         'completed with failure',
-                        'cell search completed. no cells found'
+                        'cell search completed. no cells found',
+                        'found pss but could not decode pbch',  # PBCH 디코딩 실패 = 연결 실패
+                        'could not decode pbch'  # PBCH 디코딩 실패
                     ])
                     
                     # 긍정적인 키워드 확인 (실제로 셀을 찾았을 때)
@@ -552,8 +561,21 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         'cell search: ['  # CELL SEARCH 결과 (예: [3/6/4])
                     ])
                     
-                    # "found peak"와 "cell_id:"가 함께 있으면 확실히 셀을 찾은 것
-                    found_peak_with_cell_id = 'found peak' in log_content.lower() and 'cell_id:' in log_content.lower()
+                    # 실제 연결 시도가 있었는지 확인 (RRC connection request, random access 등)
+                    actual_connection_attempt = any(keyword in log_content.lower() for keyword in [
+                        'rrc connection request',
+                        'random access',
+                        'rach',
+                        'attach request',
+                        'sending rrc',
+                        'rrc connected',
+                        'synchronized to cell'
+                    ])
+                    
+                    # "found peak"와 "cell_id:"가 함께 있고, PBCH 디코딩 실패가 없으며, 실제 연결 시도가 있으면 셀을 찾은 것
+                    found_peak_with_cell_id = ('found peak' in log_content.lower() and 'cell_id:' in log_content.lower() 
+                                               and 'could not decode pbch' not in log_content.lower()
+                                               and actual_connection_attempt)
                     
                     # 부정적인 키워드가 없고 긍정적인 키워드가 있으면 셀을 찾은 것
                     cell_found = (cell_found_positive and not no_cell_found) or found_peak_with_cell_id
