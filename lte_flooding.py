@@ -331,10 +331,14 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         else:
             imsi = f"00101{unique_id:010d}"
         
+        # device_args 설정 (선택사항)
+        device_args_line = ""
+        if self.usrp_args:
+            device_args_line = f"device_args = {self.usrp_args}\n"
+        
         config_content = f"""[rf]
 device_name = uhd
-device_args = {self.usrp_args}
-tx_gain = 90
+{device_args_line}tx_gain = 90
 rx_gain = 60
 nof_antennas = 1
 
@@ -369,7 +373,7 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     config_files.append(os.path.join(config_dir, file))
         return sorted(config_files)
     
-    def get_usrp_args_from_config(self, config_path: str) -> str:
+    def get_usrp_args_from_config(self, config_path: str) -> Optional[str]:
         """config 파일에서 device_args 읽어오기"""
         try:
             with open(config_path, 'r') as f:
@@ -382,8 +386,8 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                             return value
         except:
             pass
-        # 읽지 못하면 기본값 반환
-        return self.usrp_args
+        # 읽지 못하면 None 반환 (기본 장치 사용)
+        return None
     
     def get_config_values(self, config_path: str) -> dict:
         """config 파일에서 모든 설정 값 읽어오기"""
@@ -457,13 +461,16 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         
         # 첫 번째 config 파일에서 시리얼 번호 읽어오기
         usrp_args_from_config = self.get_usrp_args_from_config(config_files[0])
-        logger.info(f"Config 파일에서 USRP 인자 읽음: {usrp_args_from_config}")
+        if usrp_args_from_config:
+            logger.info(f"Config 파일에서 USRP 인자 읽음: {usrp_args_from_config}")
+        else:
+            logger.info("Config 파일에 USRP 인자가 없습니다. 기본 장치 사용")
         
         # 먼저 하나의 srsue로 eNB 찾기 (config 파일의 시리얼 사용)
         logger.info("eNB 탐색 중...")
         # 임시로 config 파일의 시리얼을 사용하여 스카우트 config 생성
         original_usrp_args = self.usrp_args
-        self.usrp_args = usrp_args_from_config
+        self.usrp_args = usrp_args_from_config  # None이어도 괜찮음 (기본 장치 사용)
         scout_config = self.create_ue_config(0)
         self.usrp_args = original_usrp_args  # 원래 값 복원
         scout_log = "/tmp/srsue_scout.log"
@@ -954,7 +961,7 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             config_files = self.get_config_files()
             if config_files:
                 config_values = self.get_config_values(config_files[0])
-                usrp_args_from_config = config_values['usrp_args'] or self.usrp_args
+                usrp_args_from_config = config_values['usrp_args']
                 
                 # 로그 출력용
                 target_info = []
@@ -966,7 +973,10 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     target_info.append(f"MNC: {config_values['mnc']}")
                 target_str = ", ".join(target_info) if target_info else "기본 설정"
                 logger.info(f"Config 파일에서 설정 읽음: {target_str}")
-                logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
+                if usrp_args_from_config:
+                    logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
+                else:
+                    logger.info("Config 파일에 USRP 인자가 없습니다. 기본 장치 사용")
                 
                 # USRP 연결 확인은 건너뛰고 실제 실행 시 오류 처리
                 # (config 파일에 이미 시리얼이 있으므로 확인 단계 생략)
@@ -1070,8 +1080,8 @@ def main():
     parser.add_argument(
         "--usrp-args",
         type=str,
-        default="serial=30AD123",
-        help="USRP 장치 인자 (예: serial=30AD123 또는 type=b200)"
+        default=None,
+        help="USRP 장치 인자 (예: serial=30AD123 또는 type=b200). 지정하지 않으면 기본 장치 사용"
     )
     parser.add_argument(
         "--interval",
