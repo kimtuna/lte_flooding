@@ -430,8 +430,18 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
     
     def run_srsue_with_config(self, config_path: str, log_file: str = None) -> subprocess.Popen:
         """단일 config 파일로 srsue 실행"""
+        # config 파일 경로를 절대 경로로 변환
+        if not os.path.isabs(config_path):
+            config_path = os.path.abspath(config_path)
+        
         if log_file is None:
             log_file = f"/tmp/srsue_{os.path.basename(config_path)}.log"
+        
+        # config 파일 존재 확인
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(f"Config 파일을 찾을 수 없습니다: {config_path}")
+        
+        logger.debug(f"srsue 실행: config={config_path}, log={log_file}")
         
         cmd = [
             "srsue",
@@ -468,9 +478,19 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             logger.info("Config 파일에 USRP 인자가 없습니다. 기본 장치 사용")
         
         # 먼저 하나의 srsue로 eNB 찾기 (첫 번째 config 파일을 그대로 사용)
-        logger.info("eNB 탐색 중...")
+        scout_config_file = config_files[0]
+        logger.info(f"eNB 탐색 중... (사용하는 config: {scout_config_file})")
+        
+        # config 파일 내용 확인 (디버깅)
+        try:
+            with open(scout_config_file, 'r') as f:
+                config_preview = f.read(500)  # 처음 500자만
+                logger.debug(f"Config 파일 내용 (처음 500자):\n{config_preview}")
+        except:
+            pass
+        
         scout_log = "/tmp/srsue_scout.log"
-        scout_process = self.run_srsue_with_config(config_files[0], scout_log)
+        scout_process = self.run_srsue_with_config(scout_config_file, scout_log)
         
         enb_found = False
         start_time = time.time()
@@ -507,25 +527,34 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         if len(log_lines) > 10:
                             logger.debug(f"최근 로그: {log_lines[-10:]}")
                     
-                    # eNB 찾았는지 확인 (더 많은 키워드 추가)
-                    cell_found = any(keyword in log_content.lower() for keyword in [
-                        'found plmn',
-                        'found cell',
-                        'cell found with pci',
+                    # eNB 찾았는지 확인 (실제로 셀을 찾았을 때만 매칭)
+                    # 부정적인 키워드 확인 (셀을 찾지 못했다는 메시지)
+                    no_cell_found = any(keyword in log_content.lower() for keyword in [
+                        'could not find any cell',
+                        'no cell found',
+                        'no more frequencies',
+                        'did not find any plmn',
+                        'completed with failure',
+                        'cell search completed. no cells found'
+                    ])
+                    
+                    # 긍정적인 키워드 확인 (실제로 셀을 찾았을 때)
+                    cell_found_positive = any(keyword in log_content.lower() for keyword in [
+                        'found plmn id',
+                        'found cell with pci',
                         'detected cell with pci',
                         'synchronized to cell',
-                        'synchronized',
+                        'cell found with pci',
                         'rrc connection request',
                         'random access',
                         'rach',
-                        'plmn',
-                        'pci',
-                        'cell search',
-                        'cell found',
-                        'found plmn id',
-                        'attaching',
-                        'attach request'
+                        'attach request',
+                        'sending rrc',
+                        'rrc connected'
                     ])
+                    
+                    # 부정적인 키워드가 없고 긍정적인 키워드가 있으면 셀을 찾은 것
+                    cell_found = cell_found_positive and not no_cell_found
                     
                     if cell_found:
                         enb_found = True
