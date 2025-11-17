@@ -196,22 +196,8 @@ class LTEFlooder:
             earfcn_value = 3400
             earfcn_line = f"dl_earfcn = {earfcn_value}"
         
-        # MCC/MNC 설정 (선택사항)
-        mcc_mnc_section = ""
-        target_info = []
-        if self.mcc is not None:
-            target_info.append(f"MCC={self.mcc}")
-        if self.mnc is not None:
-            target_info.append(f"MNC={self.mnc}")
-        
-        # target_info 로그는 한 번만 출력하도록 제거 (너무 많이 출력됨)
-        # if target_info:
-        #     if isinstance(earfcn_value, str):
-        #         logger.info(f"{', '.join(target_info)}로 설정된 eNB를 찾습니다 (모든 주파수 자동 스캔)")
-        #     else:
-        #         logger.info(f"{', '.join(target_info)}로 설정된 eNB를 찾습니다 (주파수: EARFCN {earfcn_value})")
-        
         # IMSI 포맷: MCC(3자리) + MNC(2-3자리) + MSIN(나머지, 최대 15자리)
+        # MCC/MNC는 IMSI에서 자동으로 추출되므로 config 파일에 별도로 지정하지 않음
         # unique_id를 사용하여 매번 다른 IMSI 생성
         if self.mcc is not None and self.mnc is not None:
             # 둘 다 지정된 경우
@@ -245,7 +231,6 @@ nof_antennas = 1
 
 [rat.eutra]
 {earfcn_line}
-{mcc_mnc_section}
 nof_carriers = 1
 
 [usim]
@@ -308,14 +293,7 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             earfcn_value = 3400
             earfcn_line = f"dl_earfcn = {earfcn_value}"
         
-        # MCC/MNC 설정
-        mcc_mnc_section = ""
-        if self.mcc is not None:
-            mcc_mnc_section += f"mcc = {self.mcc}\n"
-        if self.mnc is not None:
-            mcc_mnc_section += f"mnc = {self.mnc}\n"
-        
-        # IMSI 생성
+        # IMSI 생성 (MCC/MNC는 IMSI에서 자동으로 추출되므로 config 파일에 별도로 지정하지 않음)
         if self.mcc is not None and self.mnc is not None:
             mnc_digits = 3 if self.mnc >= 100 else 2
             mcc_mnc_len = 3 + mnc_digits
@@ -344,7 +322,7 @@ nof_antennas = 1
 
 [rat.eutra]
 {earfcn_line}
-{mcc_mnc_section}nof_carriers = 1
+nof_carriers = 1
 
 [usim]
 mode = soft
