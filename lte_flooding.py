@@ -459,22 +459,18 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             logger.error("ue_configs 폴더에 config 파일이 없습니다!")
             return
         
-        # 첫 번째 config 파일에서 시리얼 번호 읽어오기
-        usrp_args_from_config = self.get_usrp_args_from_config(config_files[0])
+        # 첫 번째 config 파일에서 설정 읽어오기
+        config_values = self.get_config_values(config_files[0])
+        usrp_args_from_config = config_values['usrp_args']
         if usrp_args_from_config:
             logger.info(f"Config 파일에서 USRP 인자 읽음: {usrp_args_from_config}")
         else:
             logger.info("Config 파일에 USRP 인자가 없습니다. 기본 장치 사용")
         
-        # 먼저 하나의 srsue로 eNB 찾기 (config 파일의 시리얼 사용)
+        # 먼저 하나의 srsue로 eNB 찾기 (첫 번째 config 파일을 그대로 사용)
         logger.info("eNB 탐색 중...")
-        # 임시로 config 파일의 시리얼을 사용하여 스카우트 config 생성
-        original_usrp_args = self.usrp_args
-        self.usrp_args = usrp_args_from_config  # None이어도 괜찮음 (기본 장치 사용)
-        scout_config = self.create_ue_config(0)
-        self.usrp_args = original_usrp_args  # 원래 값 복원
         scout_log = "/tmp/srsue_scout.log"
-        scout_process = self.run_srsue_with_config(scout_config, scout_log)
+        scout_process = self.run_srsue_with_config(config_files[0], scout_log)
         
         enb_found = False
         start_time = time.time()
@@ -519,13 +515,6 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                 scout_process.wait(timeout=2)
             except:
                 scout_process.kill()
-        
-        # 스카우트 config 파일 삭제
-        if os.path.exists(scout_config):
-            try:
-                os.remove(scout_config)
-            except:
-                pass
         
         if not enb_found:
             logger.warning("eNB를 찾지 못했습니다. 재시도합니다...")
