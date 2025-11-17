@@ -503,7 +503,13 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         # 마지막 10줄 출력 (디버깅)
                         log_lines = log_content.split('\n')
                         if len(log_lines) > 10:
-                            logger.debug(f"최근 로그: {log_lines[-10:]}")
+                            elapsed = time.time() - start_time
+                            # 10초마다 한 번씩 로그 출력
+                            if elapsed % 10 < 0.5:
+                                logger.info(f"스카우트 로그 (경과 시간: {elapsed:.1f}초):")
+                                for line in log_lines[-5:]:  # 마지막 5줄만
+                                    if line.strip():
+                                        logger.info(f"  {line[:150]}")
                     
                     # eNB 찾았는지 확인 (실제로 셀을 찾았을 때만 매칭)
                     # 부정적인 키워드 확인 (셀을 찾지 못했다는 메시지)
