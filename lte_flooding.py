@@ -223,6 +223,8 @@ class LTEFlooder:
             imsi = f"00101{unique_id:010d}"
         
         # device_args는 config 파일에 넣지 않고 명령어 옵션으로 전달
+        # IMEI 포맷팅 (6자리, 앞에 0 채우기)
+        imei_suffix = f"{unique_id:06d}"
         config_content = f"""[rf]
 device_name = uhd
 tx_gain = 90
@@ -239,7 +241,7 @@ algo = milenage
 opc  = {self.usim_opc}
 k    = {self.usim_k}
 imsi = {imsi}
-imei = 353490069873{unique_id:06d}
+imei = 353490069873{imei_suffix}
 
 [pcap]
 enable = true
@@ -310,6 +312,8 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             imsi = f"00101{unique_id:010d}"
         
         # device_args는 config 파일에 넣지 않고 명령어 옵션으로 전달
+        # IMEI 포맷팅 (6자리, 앞에 0 채우기)
+        imei_suffix = f"{unique_id:06d}"
         config_content = f""[rf]
 device_name = uhd
 tx_gain = 90
@@ -326,7 +330,7 @@ algo = milenage
 opc  = {self.usim_opc}
 k    = {self.usim_k}
 imsi = {imsi}
-imei = 353490069873{unique_id:06d}
+imei = 353490069873{imei_suffix}
 
 [pcap]
 enable = true
