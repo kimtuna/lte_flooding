@@ -968,14 +968,9 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                 logger.info(f"Config 파일에서 설정 읽음: {target_str}")
                 logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
                 
-                # USRP 연결 확인을 위해 임시로 업데이트
-                original_usrp_args = self.usrp_args
-                self.usrp_args = usrp_args_from_config
-                if not self.check_usrp_connection():
-                    self.usrp_args = original_usrp_args
-                    logger.error("USRP 장치 연결을 확인할 수 없습니다. 프로그램을 종료합니다.")
-                    raise RuntimeError("USRP 장치 연결 실패")
-                self.usrp_args = original_usrp_args  # 원래 값 복원 (실제 실행은 config 파일 사용)
+                # USRP 연결 확인은 건너뛰고 실제 실행 시 오류 처리
+                # (config 파일에 이미 시리얼이 있으므로 확인 단계 생략)
+                logger.info("USRP 연결 확인을 건너뛰고 실행합니다. (실제 실행 시 오류가 발생하면 확인하세요)")
             self.run_flooding_with_configs()
             return
         
