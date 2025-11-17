@@ -552,8 +552,24 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         'cell search: ['  # CELL SEARCH 결과 (예: [3/6/4])
                     ])
                     
+                    # "found peak"와 "cell_id:"가 함께 있으면 확실히 셀을 찾은 것
+                    found_peak_with_cell_id = 'found peak' in log_content.lower() and 'cell_id:' in log_content.lower()
+                    
                     # 부정적인 키워드가 없고 긍정적인 키워드가 있으면 셀을 찾은 것
-                    cell_found = cell_found_positive and not no_cell_found
+                    cell_found = (cell_found_positive and not no_cell_found) or found_peak_with_cell_id
+                    
+                    # 디버깅: 매칭된 키워드 확인
+                    if cell_found_positive or found_peak_with_cell_id:
+                        matched_keywords = [kw for kw in [
+                            'found plmn id', 'found cell with pci', 'detected cell with pci',
+                            'synchronized to cell', 'cell found with pci', 'rrc connection request',
+                            'random access', 'rach', 'attach request', 'sending rrc', 'rrc connected',
+                            'found peak', 'cell_id:', 'found peak psr', 'cell search: ['
+                        ] if kw in log_content.lower()]
+                        if matched_keywords:
+                            logger.info(f"셀 발견 키워드 매칭: {matched_keywords}")
+                            if found_peak_with_cell_id:
+                                logger.info("✓ 'Found peak'와 'Cell_id:' 발견 - 셀을 찾았습니다!")
                     
                     if cell_found:
                         enb_found = True
