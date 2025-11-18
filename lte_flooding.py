@@ -664,6 +664,8 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         # 모든 config 파일을 순차적으로 빠르게 실행
         config_index = 0
         current_process = None
+        process_start_time = None
+        max_process_wait_time = 3.0  # 각 프로세스당 최대 3초 대기 (PBCH 실패 시 빠르게 넘어가기)
         
         try:
             while self.running:
@@ -688,11 +690,28 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     try:
                         # usrp_args 전달 (스카우트에서 사용한 것과 동일)
                         current_process = self.run_srsue_with_config(config_path, log_file, final_usrp_args)
+                        process_start_time = time.time()
                         config_index += 1
-                        logger.debug(f"Config 실행: {os.path.basename(config_path)} ({config_index}/{len(config_files)})")
+                        if config_index % 50 == 0:
+                            logger.info(f"진행 중... {config_index}/{len(config_files)} config 실행")
                     except Exception as e:
                         logger.error(f"Config 파일 {config_path} 실행 오류: {e}")
                         config_index += 1
+                        continue
+                
+                # 타임아웃 확인 (PBCH 실패 시 빠르게 넘어가기)
+                if current_process and process_start_time:
+                    elapsed = time.time() - process_start_time
+                    if elapsed > max_process_wait_time:
+                        # 타임아웃: 다음 config로 이동
+                        if current_process.poll() is None:
+                            current_process.terminate()
+                            try:
+                                current_process.wait(timeout=0.5)
+                            except:
+                                current_process.kill()
+                        current_process = None
+                        process_start_time = None
                         continue
                 
                 # 연결 요청을 보냈는지 확인 (RRC connection request 등)
@@ -709,6 +728,9 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                             'attach request'
                         ])
                         
+                        # PBCH 디코딩 실패 확인
+                        pbch_failed = 'could not decode pbch' in log_content.lower()
+                        
                         if request_sent:
                             # 연결 요청을 보냈으면 즉시 종료하고 다음 config로
                             if current_process.poll() is None:
@@ -718,7 +740,19 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                                 except:
                                     current_process.kill()
                             current_process = None
+                            process_start_time = None
                             # 다음 config로 즉시 이동 (기다리지 않음)
+                            continue
+                        elif pbch_failed and elapsed > 1.0:
+                            # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로 (연결 불가능)
+                            if current_process.poll() is None:
+                                current_process.terminate()
+                                try:
+                                    current_process.wait(timeout=0.5)
+                                except:
+                                    current_process.kill()
+                            current_process = None
+                            process_start_time = None
                             continue
                     except:
                         pass
