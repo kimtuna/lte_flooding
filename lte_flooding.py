@@ -108,8 +108,10 @@ class LTEFlooder:
             if serial_match:
                 found_serial = serial_match.group(1)
                 # 사용자가 지정한 시리얼 추출
-                user_serial_match = re.search(r'serial=([^\s"]+)', self.usrp_args)
-                user_serial = user_serial_match.group(1) if user_serial_match else None
+                user_serial = None
+                if self.usrp_args:
+                    user_serial_match = re.search(r'serial=([^\s"]+)', self.usrp_args)
+                    user_serial = user_serial_match.group(1) if user_serial_match else None
                 
                 if user_serial and found_serial.upper() == user_serial.upper():
                     logger.info(f"✓ USRP 장치 연결 확인됨: serial={found_serial}")
@@ -131,6 +133,9 @@ class LTEFlooder:
                 "--log.all_level", "error",
                 "--log.filename", "/dev/null"
             ]
+            # USRP 인자가 있으면 명령어 옵션으로 추가
+            if self.usrp_args:
+                test_cmd.extend(["--rf.device_args", self.usrp_args])
             
             test_process = subprocess.Popen(
                 test_cmd,
@@ -459,10 +464,15 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
         # 첫 번째 config 파일에서 설정 읽어오기
         config_values = self.get_config_values(config_files[0])
         usrp_args_from_config = config_values['usrp_args']
-        if usrp_args_from_config:
-            logger.info(f"Config 파일에서 USRP 인자 읽음: {usrp_args_from_config}")
+        # 명령어로 전달할 USRP 인자 결정 (config 파일 또는 명령어 인자)
+        final_usrp_args = usrp_args_from_config or self.usrp_args
+        if final_usrp_args:
+            if usrp_args_from_config:
+                logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
+            else:
+                logger.info(f"명령어 옵션으로 USRP 인자 전달: {final_usrp_args}")
         else:
-            logger.info("Config 파일에 USRP 인자가 없습니다. 기본 장치 사용")
+            logger.info("USRP 인자가 지정되지 않았습니다. 기본 장치 사용")
         
         # 먼저 하나의 srsue로 eNB 찾기 (첫 번째 config 파일을 그대로 사용)
         scout_config_file = config_files[0]
@@ -484,9 +494,8 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
             except:
                 pass
         
-        # usrp_args 전달 (config 파일에서 읽은 값 또는 기본값)
-        scout_usrp_args = usrp_args_from_config or self.usrp_args
-        scout_process = self.run_srsue_with_config(scout_config_file, scout_log, scout_usrp_args)
+        # usrp_args 전달 (config 파일에서 읽은 값 또는 명령어 인자)
+        scout_process = self.run_srsue_with_config(scout_config_file, scout_log, final_usrp_args)
         
         enb_found = False
         start_time = time.time()
@@ -660,7 +669,7 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     
                     try:
                         # usrp_args 전달 (스카우트에서 사용한 것과 동일)
-                        current_process = self.run_srsue_with_config(config_path, log_file, scout_usrp_args)
+                        current_process = self.run_srsue_with_config(config_path, log_file, final_usrp_args)
                         config_index += 1
                         logger.debug(f"Config 실행: {os.path.basename(config_path)} ({config_index}/{len(config_files)})")
                     except Exception as e:
@@ -1066,14 +1075,30 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     target_info.append(f"MNC: {config_values['mnc']}")
                 target_str = ", ".join(target_info) if target_info else "기본 설정"
                 logger.info(f"Config 파일에서 설정 읽음: {target_str}")
-                if usrp_args_from_config:
-                    logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
+                # USRP 인자 결정 (config 파일 또는 명령어 인자)
+                final_usrp_args = usrp_args_from_config or self.usrp_args
+                if final_usrp_args:
+                    if usrp_args_from_config:
+                        logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
+                    else:
+                        logger.info(f"명령어 옵션으로 USRP 인자 전달: {final_usrp_args}")
                 else:
-                    logger.info("Config 파일에 USRP 인자가 없습니다. 기본 장치 사용")
+                    logger.info("USRP 인자가 지정되지 않았습니다. 기본 장치 사용")
                 
-                # USRP 연결 확인은 건너뛰고 실제 실행 시 오류 처리
-                # (config 파일에 이미 시리얼이 있으므로 확인 단계 생략)
-                logger.info("USRP 연결 확인을 건너뛰고 실행합니다. (실제 실행 시 오류가 발생하면 확인하세요)")
+                # USRP 연결 확인 (final_usrp_args 사용)
+                # 원래 코드처럼 항상 USRP 연결 확인 수행
+                original_usrp_args = self.usrp_args
+                if final_usrp_args:
+                    self.usrp_args = final_usrp_args
+                
+                if not self.check_usrp_connection():
+                    # 원래 값 복원
+                    self.usrp_args = original_usrp_args
+                    logger.error("USRP 장치 연결을 확인할 수 없습니다. 프로그램을 종료합니다.")
+                    raise RuntimeError("USRP 장치 연결 실패")
+                
+                # 원래 값 복원
+                self.usrp_args = original_usrp_args
             self.run_flooding_with_configs()
             return
         
