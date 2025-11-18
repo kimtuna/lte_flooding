@@ -117,14 +117,25 @@ class ConfigGenerator:
         imei = f"35349006{imei_suffix}0"  # 총 15자리
         
         config_content = f"""[rf]
-device_name = uhd
-tx_gain = 90
-rx_gain = 60
-nof_antennas = 1
+freq_offset = 0
+tx_gain = 70
+rx_gain = 40
 
 [rat.eutra]
 {earfcn_line}
-nof_carriers = 1
+
+[pcap]
+enable = none
+mac_filename = /tmp/srsue_{unique_id}_mac.pcap
+mac_nr_filename = /tmp/srsue_{unique_id}_mac_nr.pcap
+nas_filename = /tmp/srsue_{unique_id}_nas.pcap
+
+[log]
+all_level = warning
+phy_lib_level = none
+all_hex_limit = 32
+filename = /tmp/srsue_{unique_id}.log
+file_max_size = -1
 
 [usim]
 mode = soft
@@ -134,10 +145,15 @@ k    = {self.usim_k}
 imsi = {imsi}
 imei = {imei}
 
-[pcap]
-enable = true
-mac_filename = /tmp/srsue_{unique_id}_mac.pcap
-nas_filename = /tmp/srsue_{unique_id}_nas.pcap
+[rrc]
+#ue_category       = 4
+#release           = 8
+#feature_group     = 0xe6041000
+#mbms_service_id   = -1
+#mbms_service_port = 4321
+
+[gui]
+enable = false
 """
         config_path = os.path.join(output_dir, f"srsue_{unique_id}.conf")
         with open(config_path, 'w') as f:
