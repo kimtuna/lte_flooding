@@ -540,15 +540,20 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                     
                     # eNB 찾았는지 확인 (실제로 셀을 찾았을 때만 매칭)
                     # 부정적인 키워드 확인 (셀을 찾지 못했거나 연결 실패)
+                    # PBCH 디코딩 실패는 셀을 찾지 못한 것으로 처리하지 않음 (셀은 찾았지만 디코딩만 실패한 경우)
                     no_cell_found = any(keyword in log_content.lower() for keyword in [
                         'could not find any cell',
                         'no cell found',
                         'no more frequencies',
                         'did not find any plmn',
                         'completed with failure',
-                        'cell search completed. no cells found',
-                        'found pss but could not decode pbch',  # PBCH 디코딩 실패 = 연결 실패
-                        'could not decode pbch'  # PBCH 디코딩 실패
+                        'cell search completed. no cells found'
+                    ])
+                    
+                    # PBCH 디코딩 실패 확인 (경고용, 셀 찾기 실패로는 처리하지 않음)
+                    pbch_decode_failed = any(keyword in log_content.lower() for keyword in [
+                        'found pss but could not decode pbch',
+                        'could not decode pbch'
                     ])
                     
                     # PBCH 디코딩 성공 확인
@@ -591,14 +596,12 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         'synchronized to cell'
                     ])
                     
-                    # "found peak"와 "cell_id:"가 함께 있고, PBCH 디코딩이 성공했거나 연결 시도가 있으면 셀을 찾은 것
-                    found_peak_with_cell_id = ('found peak' in log_content.lower() and 'cell_id:' in log_content.lower() 
-                                               and 'could not decode pbch' not in log_content.lower()
-                                               and (pbch_decoded or actual_connection_attempt))
+                    # "found peak"와 "cell_id:"가 함께 있으면 셀을 찾은 것 (PBCH 디코딩 실패해도 셀은 찾은 것으로 처리)
+                    found_peak_with_cell_id = ('found peak' in log_content.lower() and 'cell_id:' in log_content.lower())
                     
-                    # 부정적인 키워드가 없고, 긍정적인 키워드가 있으며, PBCH 디코딩이 성공했거나 연결 시도가 있으면 셀을 찾은 것
-                    cell_found = ((cell_found_positive and not no_cell_found and (pbch_decoded or actual_connection_attempt)) 
-                                 or found_peak_with_cell_id)
+                    # 부정적인 키워드가 없고, 긍정적인 키워드가 있으면 셀을 찾은 것
+                    # PBCH 디코딩 실패는 경고만 표시하고 공격은 진행
+                    cell_found = (cell_found_positive and not no_cell_found) or found_peak_with_cell_id
                     
                     # 디버깅: 매칭된 키워드 확인
                     if cell_found_positive or found_peak_with_cell_id:
@@ -610,18 +613,14 @@ nas_filename = /tmp/srsue_{unique_id}_nas.pcap
                         ] if kw in log_content.lower()]
                         if matched_keywords:
                             logger.info(f"셀 발견 키워드 매칭: {matched_keywords}")
-                            # PBCH 디코딩 상태 확인
+                            # PBCH 디코딩 상태 확인 (경고만 표시, 공격은 진행)
                             if pbch_decoded:
                                 logger.info("✓ PBCH 디코딩 성공 확인됨")
-                            elif 'could not decode pbch' in log_content.lower():
-                                logger.warning("⚠ PBCH 디코딩 실패 - 셀을 찾았지만 연결 불가능")
-                            else:
-                                logger.info("⚠ PBCH 디코딩 상태 불명확 - 추가 대기 중...")
+                            elif pbch_decode_failed:
+                                logger.warning("⚠ PBCH 디코딩 실패 - 셀은 찾았지만 디코딩 실패 (공격은 진행합니다)")
                             # 연결 시도 확인
                             if actual_connection_attempt:
                                 logger.info("✓ 실제 연결 시도 확인됨")
-                            else:
-                                logger.info("⚠ 아직 연결 시도 없음 - 추가 대기 중...")
                             if found_peak_with_cell_id:
                                 logger.info("✓ 'Found peak'와 'Cell_id:' 발견 - 셀을 찾았습니다!")
                     
