@@ -1,0 +1,42 @@
+[rf]
+freq_offset = 0
+tx_gain = 70
+rx_gain = 40
+
+[rat.eutra]
+# dl_earfcn은 명령줄 인자로 오버라이드됩니다
+# dl_earfcn = 3400
+
+[pcap]
+enable = none
+mac_filename = /tmp/srsue_mac.pcap
+mac_nr_filename = /tmp/srsue_mac_nr.pcap
+nas_filename = /tmp/srsue_nas.pcap
+
+[log]
+all_level = warning
+phy_lib_level = none
+all_hex_limit = 32
+filename = /tmp/srsue.log
+file_max_size = -1
+
+[usim]
+mode = soft
+algo = milenage
+# opc, k, imsi, imei는 명령줄 인자로 오버라이드됩니다
+# .env 파일 또는 환경변수에서 USIM_OPC, USIM_K를 설정하세요
+# opc = YOUR_OPC_HERE
+# k    = YOUR_K_HERE
+# imsi = 001010000000001
+# imei = 353490060000010
+
+[rrc]
+#ue_category       = 4
+#release           = 8
+#feature_group     = 0xe6041000
+#mbms_service_id   = -1
+#mbms_service_port = 4321
+
+[gui]
+enable = false
+

