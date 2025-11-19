@@ -277,16 +277,8 @@ class LTEFlooder:
             logger.error("USRP 장치 연결을 확인할 수 없습니다.")
             raise RuntimeError("USRP 장치 연결 실패")
         
-        # eNB 찾기 (템플릿 config 사용, 임시 IMSI/IMEI 생성)
-        # eNB 찾기 단계에서는 UE ID 1을 사용
-        from flooding_attack import generate_imsi_imei
-        temp_imsi, temp_imei = generate_imsi_imei(1, self.mcc, self.mnc)
-        enb_found = find_enb(
-            self.template_config, self.usrp_args,
-            imsi=temp_imsi, imei=temp_imei,
-            usim_opc=self.usim_opc, usim_k=self.usim_k,
-            earfcn=self.earfcn
-        )
+        # eNB 찾기 (템플릿 config 사용)
+        enb_found = find_enb(self.template_config, self.usrp_args)
         
         if not enb_found:
             logger.warning("eNB를 찾지 못했습니다.")

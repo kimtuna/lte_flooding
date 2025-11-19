@@ -63,11 +63,8 @@ def get_config_values(config_path: str) -> dict:
     return values
 
 
-def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[str] = None,
-                          imsi: Optional[str] = None, imei: Optional[str] = None,
-                          usim_opc: Optional[str] = None, usim_k: Optional[str] = None,
-                          earfcn: Optional[int] = None) -> subprocess.Popen:
-    """단일 config 파일로 srsue 실행 (명령줄 인자로 IMSI/IMEI 오버라이드 가능)"""
+def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[str] = None) -> subprocess.Popen:
+    """단일 config 파일로 srsue 실행"""
     import sys
     
     # config 파일 경로를 절대 경로로 변환
@@ -89,18 +86,6 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     if usrp_args:
         cmd.extend(["--rf.device_args", usrp_args])
     
-    # IMSI/IMEI를 명령줄 인자로 오버라이드
-    if imsi:
-        cmd.extend(["--usim.imsi", imsi])
-    if imei:
-        cmd.extend(["--usim.imei", imei])
-    if usim_opc:
-        cmd.extend(["--usim.opc", usim_opc])
-    if usim_k:
-        cmd.extend(["--usim.k", usim_k])
-    if earfcn is not None:
-        cmd.extend(["--rat.eutra.dl_earfcn", str(earfcn)])
-    
     kwargs = {
         'stdout': subprocess.PIPE,
         'stderr': subprocess.PIPE,
@@ -113,10 +98,7 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     return subprocess.Popen(cmd, **kwargs)
 
 
-def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: int = 60,
-             imsi: Optional[str] = None, imei: Optional[str] = None,
-             usim_opc: Optional[str] = None, usim_k: Optional[str] = None,
-             earfcn: Optional[int] = None) -> bool:
+def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: int = 60) -> bool:
     """
     eNB를 찾습니다.
     
@@ -124,11 +106,6 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
         config_file: 사용할 config 파일 경로
         usrp_args: USRP 장치 인자
         max_wait_time: 최대 대기 시간 (초)
-        imsi: IMSI (명령줄 인자로 전달)
-        imei: IMEI (명령줄 인자로 전달)
-        usim_opc: USIM OPC (명령줄 인자로 전달)
-        usim_k: USIM K (명령줄 인자로 전달)
-        earfcn: EARFCN (명령줄 인자로 전달)
     
     Returns:
         eNB를 찾았으면 True, 아니면 False
@@ -144,13 +121,8 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
     
     logger.info(f"eNB 탐색 중... (사용하는 config: {config_file})")
     
-    # Scout 프로세스 시작 (IMSI/IMEI 전달)
-    scout_process = run_srsue_with_config(
-        config_file, scout_log, usrp_args,
-        imsi=imsi, imei=imei,
-        usim_opc=usim_opc, usim_k=usim_k,
-        earfcn=earfcn
-    )
+    # Scout 프로세스 시작
+    scout_process = run_srsue_with_config(config_file, scout_log, usrp_args)
     
     enb_found = False
     start_time = time.time()
@@ -204,18 +176,29 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
                     'pbch decoded',
                     'decoded pbch',
                     'mib decoded',
+                    'mib received',
                     'system information',
                     'sib1',
-                    'synchronized to cell'
+                    'sib1 received',
+                    'synchronized to cell',
+                    'cell synchronized',
+                    'found cell',
+                    'cell found'
                 ])
                 
-                # 긍정적인 키워드 확인
+                # 긍정적인 키워드 확인 (더 많은 키워드 추가)
                 cell_found_positive = any(keyword in log_content.lower() for keyword in [
                     'found plmn id',
+                    'found plmn',
+                    'plmn found',
                     'found cell with pci',
                     'detected cell with pci',
+                    'cell with pci',
                     'synchronized to cell',
+                    'cell synchronized',
                     'cell found with pci',
+                    'cell found',
+                    'found cell',
                     'rrc connection request',
                     'random access',
                     'rach',
@@ -225,7 +208,16 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
                     'found peak',
                     'cell_id:',
                     'found peak psr',
-                    'cell search: ['
+                    'cell search: [',
+                    'pci:',
+                    'pci =',
+                    'pss found',
+                    'sss found',
+                    'found pss',
+                    'found sss',
+                    'peak found',
+                    'mib decoded successfully',
+                    'sib decoded'
                 ])
                 
                 # 실제 연결 시도 확인
@@ -242,27 +234,42 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
                 # "found peak"와 "cell_id:"가 함께 있으면 셀을 찾은 것
                 found_peak_with_cell_id = ('found peak' in log_content.lower() and 'cell_id:' in log_content.lower())
                 
-                # 셀 찾기 판단
-                cell_found = (cell_found_positive and not no_cell_found) or found_peak_with_cell_id
+                # 셀 찾기 판단 (더 관대한 조건)
+                # PBCH 디코딩 성공만으로도 셀을 찾은 것으로 간주
+                cell_found = (cell_found_positive and not no_cell_found) or found_peak_with_cell_id or pbch_decoded
                 
-                # 디버깅 정보
-                if cell_found_positive or found_peak_with_cell_id:
+                # 디버깅 정보 (더 자세한 로그 출력)
+                if cell_found_positive or found_peak_with_cell_id or pbch_decoded:
                     matched_keywords = [kw for kw in [
-                        'found plmn id', 'found cell with pci', 'detected cell with pci',
-                        'synchronized to cell', 'cell found with pci', 'rrc connection request',
+                        'found plmn id', 'found plmn', 'plmn found', 'found cell with pci', 
+                        'detected cell with pci', 'synchronized to cell', 'cell synchronized',
+                        'cell found with pci', 'cell found', 'found cell', 'rrc connection request',
                         'random access', 'rach', 'attach request', 'sending rrc', 'rrc connected',
-                        'found peak', 'cell_id:', 'found peak psr', 'cell search: ['
+                        'found peak', 'cell_id:', 'found peak psr', 'cell search: [',
+                        'pci:', 'pss found', 'sss found', 'mib decoded', 'sib decoded'
                     ] if kw in log_content.lower()]
                     if matched_keywords:
                         logger.info(f"셀 발견 키워드 매칭: {matched_keywords}")
                         if pbch_decoded:
-                            logger.info("✓ PBCH 디코딩 성공 확인됨")
+                            logger.info("✓ PBCH/MIB 디코딩 성공 확인됨")
                         elif pbch_decode_failed:
                             logger.warning("⚠ PBCH 디코딩 실패 - 셀은 찾았지만 디코딩 실패 (공격은 진행합니다)")
                         if actual_connection_attempt:
                             logger.info("✓ 실제 연결 시도 확인됨")
                         if found_peak_with_cell_id:
                             logger.info("✓ 'Found peak'와 'Cell_id:' 발견 - 셀을 찾았습니다!")
+                
+                # 추가 디버깅: 최근 로그 라인 출력 (셀 관련 메시지가 있는지 확인)
+                if elapsed > 5 and elapsed % 5 < 0.5:  # 5초마다 최근 로그 확인
+                    recent_lines = log_content.split('\n')[-10:]
+                    cell_related = [line for line in recent_lines if any(kw in line.lower() for kw in [
+                        'cell', 'pci', 'pss', 'sss', 'pbch', 'mib', 'sib', 'plmn', 'synchronized', 'peak'
+                    ])]
+                    if cell_related:
+                        logger.debug(f"최근 셀 관련 로그 ({len(cell_related)}개):")
+                        for line in cell_related[-3:]:  # 최근 3개만
+                            if line.strip():
+                                logger.debug(f"  {line[:200]}")
                 
                 if cell_found:
                     enb_found = True
@@ -280,6 +287,11 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
             scout_process.wait(timeout=2)
         except:
             scout_process.kill()
+    
+    # eNB를 찾지 못한 경우 로그 파일 경로 안내
+    if not enb_found:
+        logger.warning(f"eNB를 찾지 못했습니다. 로그 파일을 확인하세요: {scout_log}")
+        logger.info("로그에서 'cell', 'pci', 'pss', 'sss', 'pbch', 'mib', 'plmn' 등의 키워드를 검색해보세요.")
     
     return enb_found
 
