@@ -143,6 +143,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     current_process = None
     process_start_time = None
     current_log_file = None
+    last_log_position = {}  # 각 로그 파일의 마지막 읽은 위치 저장
     max_process_wait_time = 10.0  # 최후의 수단: 프로세스가 멈춰있을 때만 사용 (기본적으로 로그 기반으로 종료)
     
     try:
@@ -214,6 +215,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                                 logger.warning(f"프로세스 stderr: {stderr_output[:500]}")
                         except:
                             pass
+                    # 로그 위치 정보 정리
+                    if current_log_file in last_log_position:
+                        del last_log_position[current_log_file]
                     current_process = None
                     process_start_time = None
                     current_log_file = None
@@ -223,6 +227,24 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 if current_log_file and os.path.exists(current_log_file):
                     try:
                         with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            # 마지막 읽은 위치로 이동
+                            if current_log_file in last_log_position:
+                                f.seek(last_log_position[current_log_file])
+                            else:
+                                last_log_position[current_log_file] = 0
+                            
+                            # 새로 추가된 내용만 읽기
+                            new_content = f.read()
+                            if new_content:
+                                # 새 로그 출력
+                                for line in new_content.split('\n'):
+                                    if line.strip():
+                                        logger.info(f"[UE {ue_id-1}] {line}")
+                                # 마지막 위치 업데이트
+                                last_log_position[current_log_file] = f.tell()
+                            
+                            # 전체 로그 내용도 읽어서 키워드 체크 (파일 처음부터)
+                            f.seek(0)
                             log_content = f.read()
                         
                         # RRC Connection Request 전송 확인 (정확히 이것만 체크)
@@ -263,6 +285,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                                     current_process.wait(timeout=0.3)
                                 except:
                                     current_process.kill()
+                            # 로그 위치 정보 정리
+                            if current_log_file in last_log_position:
+                                del last_log_position[current_log_file]
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -275,6 +300,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                                     current_process.wait(timeout=0.3)
                                 except:
                                     current_process.kill()
+                            # 로그 위치 정보 정리
+                            if current_log_file in last_log_position:
+                                del last_log_position[current_log_file]
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -287,6 +315,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                                     current_process.wait(timeout=0.3)
                                 except:
                                     current_process.kill()
+                            # 로그 위치 정보 정리
+                            if current_log_file in last_log_position:
+                                del last_log_position[current_log_file]
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -299,6 +330,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                                     current_process.wait(timeout=0.3)
                                 except:
                                     current_process.kill()
+                            # 로그 위치 정보 정리
+                            if current_log_file in last_log_position:
+                                del last_log_position[current_log_file]
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -311,6 +345,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     # 프로세스 상태 확인
                     if current_process.poll() is not None:
                         logger.warning(f"프로세스가 종료됨 (로그 파일 생성 전, 경과: {elapsed:.2f}초, 종료 코드: {current_process.returncode})")
+                        # 로그 위치 정보 정리
+                        if current_log_file in last_log_position:
+                            del last_log_position[current_log_file]
                         current_process = None
                         process_start_time = None
                         current_log_file = None
@@ -330,6 +367,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             current_process.wait(timeout=0.5)
                         except:
                             current_process.kill()
+                    # 로그 위치 정보 정리
+                    if current_log_file in last_log_position:
+                        del last_log_position[current_log_file]
                     current_process = None
                     process_start_time = None
                     current_log_file = None
