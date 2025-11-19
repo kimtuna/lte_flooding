@@ -237,65 +237,66 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 
                 # 로그 파일이 생성되었는지 확인
                 if current_log_file and os.path.exists(current_log_file):
-                
                     try:
                         with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
                             log_content = f.read()
-                    
-                    # RRC Connection Request 전송 확인 (정확히 이것만 체크)
-                    rrc_request_sent = any(keyword in log_content.lower() for keyword in [
-                        'rrc connection request',
-                        'sending rrc connection request',
-                        'rrc connection request sent'
-                    ])
-                    
-                    # RACH 전송도 체크 (RRC Request 전 단계)
-                    rach_sent = any(keyword in log_content.lower() for keyword in [
-                        'random access',
-                        'rach',
-                        'preamble',
-                        'sending rach'
-                    ])
-                    
-                    # PBCH 디코딩 실패 확인
-                    pbch_failed = 'could not decode pbch' in log_content.lower()
-                    elapsed = time.time() - process_start_time if process_start_time else 0
-                    
-                    # RRC Connection Request를 보냈으면 즉시 종료 (Setup은 무시)
-                    if rrc_request_sent:
-                        # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로
-                        if current_process.poll() is None:
-                            current_process.terminate()
-                            try:
-                                current_process.wait(timeout=0.3)
-                            except:
-                                current_process.kill()
-                        current_process = None
-                        process_start_time = None
-                        continue
-                    elif rach_sent and elapsed > 0.5:
-                        # RACH 전송 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
-                        if current_process.poll() is None:
-                            current_process.terminate()
-                            try:
-                                current_process.wait(timeout=0.3)
-                            except:
-                                current_process.kill()
-                        current_process = None
-                        process_start_time = None
-                        continue
-                    elif pbch_failed and elapsed > 1.0:
-                        # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로
-                        if current_process.poll() is None:
-                            current_process.terminate()
-                            try:
-                                current_process.wait(timeout=0.3)
-                            except:
-                                current_process.kill()
-                        current_process = None
-                        process_start_time = None
-                        current_log_file = None
-                        continue
+                        
+                        # RRC Connection Request 전송 확인 (정확히 이것만 체크)
+                        rrc_request_sent = any(keyword in log_content.lower() for keyword in [
+                            'rrc connection request',
+                            'sending rrc connection request',
+                            'rrc connection request sent'
+                        ])
+                        
+                        # RACH 전송도 체크 (RRC Request 전 단계)
+                        rach_sent = any(keyword in log_content.lower() for keyword in [
+                            'random access',
+                            'rach',
+                            'preamble',
+                            'sending rach'
+                        ])
+                        
+                        # PBCH 디코딩 실패 확인
+                        pbch_failed = 'could not decode pbch' in log_content.lower()
+                        elapsed = time.time() - process_start_time if process_start_time else 0
+                        
+                        # RRC Connection Request를 보냈으면 즉시 종료 (Setup은 무시)
+                        if rrc_request_sent:
+                            # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로
+                            if current_process.poll() is None:
+                                current_process.terminate()
+                                try:
+                                    current_process.wait(timeout=0.3)
+                                except:
+                                    current_process.kill()
+                            current_process = None
+                            process_start_time = None
+                            current_log_file = None
+                            continue
+                        elif rach_sent and elapsed > 0.5:
+                            # RACH 전송 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
+                            if current_process.poll() is None:
+                                current_process.terminate()
+                                try:
+                                    current_process.wait(timeout=0.3)
+                                except:
+                                    current_process.kill()
+                            current_process = None
+                            process_start_time = None
+                            current_log_file = None
+                            continue
+                        elif pbch_failed and elapsed > 1.0:
+                            # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로
+                            if current_process.poll() is None:
+                                current_process.terminate()
+                                try:
+                                    current_process.wait(timeout=0.3)
+                                except:
+                                    current_process.kill()
+                            current_process = None
+                            process_start_time = None
+                            current_log_file = None
+                            continue
                     except Exception as e:
                         logger.debug(f"로그 파일 읽기 오류: {e}")
                 elif current_log_file:
