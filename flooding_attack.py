@@ -276,8 +276,8 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             process_start_time = None
                             current_log_file = None
                             continue
-                        elif pbch_failed and elapsed > 0.3:
-                            # PBCH 디코딩 실패이고 0.3초 이상 지났으면 다음으로
+                        elif pbch_failed:
+                            # PBCH 디코딩 실패 시 즉시 종료
                             if current_process.poll() is None:
                                 current_process.kill()
                             # 로그 위치 정보 정리
@@ -309,11 +309,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     except KeyboardInterrupt:
         pass
     finally:
-        # 정리
+        # 정리 (즉시 kill)
         if current_process and current_process.poll() is None:
-            try:
-                current_process.terminate()
-                current_process.wait(timeout=1)
-            except:
-                current_process.kill()
+            current_process.kill()
 
