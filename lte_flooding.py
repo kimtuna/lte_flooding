@@ -238,6 +238,27 @@ class LTEFlooder:
             logger.error("USIM 키를 찾을 수 없습니다. .env 파일 또는 환경변수(USIM_OPC, USIM_K)를 설정하세요.")
             raise ValueError("USIM 키가 설정되지 않았습니다.")
         
+        # USIM 키 길이 검증 (32자리 16진수)
+        if len(k) != 32:
+            logger.error(f"USIM K 길이가 잘못되었습니다: {len(k)}자 (32자 필요)")
+            if len(k) > 0:
+                logger.error(f"현재 값 (처음 20자): {k[:20]}...")
+            raise ValueError(f"USIM K는 32자리 16진수여야 합니다. 현재: {len(k)}자")
+        
+        if len(opc) != 32:
+            logger.error(f"USIM OPC 길이가 잘못되었습니다: {len(opc)}자 (32자 필요)")
+            if len(opc) > 0:
+                logger.error(f"현재 값 (처음 20자): {opc[:20]}...")
+            raise ValueError(f"USIM OPC는 32자리 16진수여야 합니다. 현재: {len(opc)}자")
+        
+        # 16진수 형식 검증
+        try:
+            int(k, 16)
+            int(opc, 16)
+        except ValueError:
+            logger.error("USIM 키는 16진수 형식이어야 합니다 (0-9, a-f)")
+            raise ValueError("USIM 키 형식 오류")
+        
         return opc, k
     
     def start(self):
