@@ -262,13 +262,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         
                         # RRC Connection Request를 보냈으면 즉시 종료 (Setup은 무시)
                         if rrc_request_sent:
-                            # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로
+                            # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로 (대기 시간 0)
                             if current_process.poll() is None:
-                                current_process.terminate()
-                                try:
-                                    current_process.wait(timeout=0.3)
-                                except:
-                                    current_process.kill()
+                                current_process.kill()  # 즉시 kill (대기 시간 없음)
                             current_process = None
                             process_start_time = None
                             current_log_file = None
