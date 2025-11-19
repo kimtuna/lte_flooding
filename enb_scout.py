@@ -63,8 +63,11 @@ def get_config_values(config_path: str) -> dict:
     return values
 
 
-def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[str] = None) -> subprocess.Popen:
-    """단일 config 파일로 srsue 실행"""
+def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[str] = None,
+                          imsi: Optional[str] = None, imei: Optional[str] = None,
+                          usim_opc: Optional[str] = None, usim_k: Optional[str] = None,
+                          earfcn: Optional[int] = None) -> subprocess.Popen:
+    """단일 config 파일로 srsue 실행 (명령줄 인자로 IMSI/IMEI 오버라이드 가능)"""
     import sys
     
     # config 파일 경로를 절대 경로로 변환
@@ -86,6 +89,18 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     if usrp_args:
         cmd.extend(["--rf.device_args", usrp_args])
     
+    # IMSI/IMEI를 명령줄 인자로 오버라이드
+    if imsi:
+        cmd.extend(["--usim.imsi", imsi])
+    if imei:
+        cmd.extend(["--usim.imei", imei])
+    if usim_opc:
+        cmd.extend(["--usim.opc", usim_opc])
+    if usim_k:
+        cmd.extend(["--usim.k", usim_k])
+    if earfcn is not None:
+        cmd.extend(["--rat.eutra.dl_earfcn", str(earfcn)])
+    
     kwargs = {
         'stdout': subprocess.PIPE,
         'stderr': subprocess.PIPE,
@@ -98,7 +113,10 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     return subprocess.Popen(cmd, **kwargs)
 
 
-def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: int = 60) -> bool:
+def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: int = 60,
+             imsi: Optional[str] = None, imei: Optional[str] = None,
+             usim_opc: Optional[str] = None, usim_k: Optional[str] = None,
+             earfcn: Optional[int] = None) -> bool:
     """
     eNB를 찾습니다.
     
@@ -106,6 +124,11 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
         config_file: 사용할 config 파일 경로
         usrp_args: USRP 장치 인자
         max_wait_time: 최대 대기 시간 (초)
+        imsi: IMSI (명령줄 인자로 전달)
+        imei: IMEI (명령줄 인자로 전달)
+        usim_opc: USIM OPC (명령줄 인자로 전달)
+        usim_k: USIM K (명령줄 인자로 전달)
+        earfcn: EARFCN (명령줄 인자로 전달)
     
     Returns:
         eNB를 찾았으면 True, 아니면 False
@@ -121,8 +144,13 @@ def find_enb(config_file: str, usrp_args: Optional[str] = None, max_wait_time: i
     
     logger.info(f"eNB 탐색 중... (사용하는 config: {config_file})")
     
-    # Scout 프로세스 시작
-    scout_process = run_srsue_with_config(config_file, scout_log, usrp_args)
+    # Scout 프로세스 시작 (IMSI/IMEI 전달)
+    scout_process = run_srsue_with_config(
+        config_file, scout_log, usrp_args,
+        imsi=imsi, imei=imei,
+        usim_opc=usim_opc, usim_k=usim_k,
+        earfcn=earfcn
+    )
     
     enb_found = False
     start_time = time.time()
