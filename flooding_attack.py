@@ -155,13 +155,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
             
             # 현재 프로세스가 없거나 종료되었으면 다음 UE 실행
             if current_process is None or current_process.poll() is not None:
-                # 이전 프로세스가 있으면 정리
+                # 이전 프로세스가 있으면 정리 (즉시 kill)
                 if current_process and current_process.poll() is None:
-                    try:
-                        current_process.terminate()
-                        current_process.wait(timeout=1)
-                    except:
-                        current_process.kill()
+                    current_process.kill()
                 
                 # IMSI/IMEI 생성 (UE ID는 계속 증가)
                 imsi, imei = generate_imsi_imei(ue_id, mcc, mnc)
@@ -256,11 +252,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         elif rach_sent and elapsed > 0.5:
                             # RACH 전송 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
                             if current_process.poll() is None:
-                                current_process.terminate()
-                                try:
-                                    current_process.wait(timeout=0.3)
-                                except:
-                                    current_process.kill()
+                                current_process.kill()
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -268,11 +260,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         elif pbch_failed and elapsed > 1.0:
                             # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로
                             if current_process.poll() is None:
-                                current_process.terminate()
-                                try:
-                                    current_process.wait(timeout=0.3)
-                                except:
-                                    current_process.kill()
+                                current_process.kill()
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -299,11 +287,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     # 타임아웃: 다음 config로 이동 (로그에서 종료 조건을 찾지 못한 경우)
                     logger.info(f"UE 타임아웃 (경과: {elapsed:.2f}초) → 다음 UE로 이동")
                     if current_process.poll() is None:
-                        current_process.terminate()
-                        try:
-                            current_process.wait(timeout=0.5)
-                        except:
-                            current_process.kill()
+                        current_process.kill()
                     current_process = None
                     process_start_time = None
                     current_log_file = None
@@ -317,11 +301,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     except KeyboardInterrupt:
         pass
     finally:
-        # 정리
+        # 정리 (즉시 kill)
         if current_process and current_process.poll() is None:
-            try:
-                current_process.terminate()
-                current_process.wait(timeout=1)
-            except:
-                current_process.kill()
+            current_process.kill()
 
