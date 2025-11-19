@@ -341,10 +341,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     current_log_file = None
                     continue
             
-            # 짧은 대기 후 다시 확인
-            
-            # 짧은 대기 후 다시 확인
-            time.sleep(0.1)
+            # 대기 없이 계속 확인 (더 빠른 전송)
             
     except KeyboardInterrupt:
         pass
