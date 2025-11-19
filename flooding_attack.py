@@ -143,7 +143,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     current_process = None
     process_start_time = None
     current_log_file = None
-    max_process_wait_time = 2.0  # 각 프로세스당 최대 2초 대기 (RRC Request만 보내고 종료)
+    # 타임아웃 제거: 로그 기반으로만 종료
     
     try:
         loop_count = 0
@@ -280,18 +280,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     elif elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
                         logger.info(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초, 프로세스 실행 중)")
             
-            # 타임아웃 확인 (RRC 체크 이후 - 최후의 수단)
-            if current_process and process_start_time:
-                elapsed = time.time() - process_start_time
-                if elapsed > max_process_wait_time:
-                    # 타임아웃: 다음 config로 이동 (로그에서 종료 조건을 찾지 못한 경우)
-                    logger.info(f"UE 타임아웃 (경과: {elapsed:.2f}초) → 다음 UE로 이동")
-                    if current_process.poll() is None:
-                        current_process.kill()
-                    current_process = None
-                    process_start_time = None
-                    current_log_file = None
-                    continue
+            # 타임아웃 체크 제거 (로그 기반으로만 종료)
             
             # 짧은 대기 후 다시 확인
             
