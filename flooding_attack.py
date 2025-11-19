@@ -200,7 +200,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     # 프로세스가 종료됨
                     elapsed = time.time() - process_start_time if process_start_time else 0
                     return_code = current_process.returncode
-                    logger.info(f"UE 프로세스가 종료됨 (경과: {elapsed:.2f}초, 종료 코드: {return_code})")
+                    logger.info(f"config_{ue_id-1} 완료")
                     if return_code != 0:
                         logger.warning(f"UE 프로세스가 비정상 종료 (종료 코드: {return_code})")
                         # stderr 확인
@@ -245,6 +245,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             # RRC Request 전송 확인 → 즉시 종료하고 다음 UE로 (대기 시간 0)
                             if current_process.poll() is None:
                                 current_process.kill()  # 즉시 kill (대기 시간 없음)
+                            logger.info(f"config_{ue_id-1} 완료")
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -253,6 +254,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             # RACH 전송 후 0.5초 지났으면 다음으로 (RRC Request가 곧 올 것)
                             if current_process.poll() is None:
                                 current_process.kill()
+                            logger.info(f"config_{ue_id-1} 완료")
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -261,6 +263,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로
                             if current_process.poll() is None:
                                 current_process.kill()
+                            logger.info(f"config_{ue_id-1} 완료")
                             current_process = None
                             process_start_time = None
                             current_log_file = None
@@ -272,7 +275,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     elapsed = time.time() - process_start_time if process_start_time else 0
                     # 프로세스 상태 확인
                     if current_process.poll() is not None:
-                        logger.warning(f"프로세스가 종료됨 (로그 파일 생성 전, 경과: {elapsed:.2f}초, 종료 코드: {current_process.returncode})")
+                        logger.info(f"config_{ue_id-1} 완료")
                         current_process = None
                         process_start_time = None
                         current_log_file = None
