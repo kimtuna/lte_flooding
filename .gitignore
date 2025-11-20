@@ -28,4 +28,5 @@ Thumbs.db
 # Build artifacts
 attack_ue/build/
 attack_ue/srsue/build/
+attack_ue/**/build/
 

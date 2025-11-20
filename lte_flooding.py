@@ -231,11 +231,26 @@ def main():
     parser.add_argument(
         "--srsue-path",
         type=str,
-        default="attack_ue/build/srsue/src/srsue",
-        help="srsue 바이너리 경로 (기본값: attack_ue/build/srsue/src/srsue)"
+        default=None,
+        help="srsue 바이너리 경로 (기본값: 자동 탐지)"
     )
     
     args = parser.parse_args()
+    
+    # srsue 바이너리 경로 자동 탐지
+    if not args.srsue_path:
+        possible_paths = [
+            "attack_ue/build/srsue/src/srsue",
+            "attack_ue/build/srsue/srsue",
+            "attack_ue/srsue/build/src/srsue",
+        ]
+        for path in possible_paths:
+            if os.path.exists(path) and os.path.isfile(path):
+                args.srsue_path = path
+                logger.info(f"자동 탐지: srsue 바이너리 경로 = {path}")
+                break
+        if not args.srsue_path:
+            logger.warning("srsue 바이너리를 자동으로 찾을 수 없습니다. --srsue-path를 지정하세요.")
     
     # 템플릿 config 방식 (ue_template.conf 사용)
     flooder = LTEFlooder(
