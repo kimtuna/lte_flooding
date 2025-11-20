@@ -78,7 +78,8 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
         "srsue",
         config_path,
         "--log.filename", log_file,
-        "--log.all_level", "info"
+        "--log.all_level", "info",
+        "--log.rrc_level", "debug"  # RRC 레벨을 debug로 설정하여 Msg3 로그 확인
     ]
     
     # device_args를 명령어 옵션으로 추가
@@ -263,6 +264,22 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             process_start_time = None
                             current_log_file = None
                             continue
+                        # RAR 수신했는데 Msg3가 안 오는 경우 진단
+                        elif rar_received and elapsed > 2.0:
+                            # RAR는 받았는데 Msg3가 2초 이상 안 오면 문제
+                            logger.warning(f"config_{ue_id-1} RAR 수신했지만 Msg3 전송 안 됨 (경과: {elapsed:.1f}초)")
+                            # 더 기다려보기 (최대 5초)
+                            if elapsed < 5.0:
+                                continue  # 계속 기다림
+                            else:
+                                # 5초 넘으면 종료
+                                if current_process.poll() is None:
+                                    current_process.kill()
+                                logger.info(f"config_{ue_id-1} 완료 (RAR 수신했지만 Msg3 타임아웃)")
+                                current_process = None
+                                process_start_time = None
+                                current_log_file = None
+                                continue
                         # RACH만 감지하고 RRC Request를 기다리는 중 (종료하지 않음)
                         # RAR 수신 후 RRC Request를 기다리는 중일 수 있음
                         elif pbch_failed and elapsed > 1.0:

@@ -7,5 +7,6 @@ cd /home/parklab/.config/srsran/
 
 usrp 확인
 uhd_find_devices
+
 flooding 실행
-python3 lte_flooding.py --use-configs --usrp-args "serial=34C78E4"
+python3 lte_flooding.py --usrp-args "serial=34C78E4" --mcc 123 --mnc 456 --earfcn 1650
