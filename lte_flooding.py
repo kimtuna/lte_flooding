@@ -68,12 +68,13 @@ class LTEFlooder:
     
     def __init__(self, usrp_args: Optional[str] = None, mcc: Optional[int] = None,
                  mnc: Optional[int] = None, earfcn: Optional[int] = None,
-                 template_config: Optional[str] = None):
+                 template_config: Optional[str] = None, srsue_path: Optional[str] = None):
         self.usrp_args = usrp_args
         self.mcc = mcc
         self.mnc = mnc
         self.earfcn = earfcn
         self.template_config = template_config or "ue_template.conf"
+        self.srsue_path = srsue_path
         self.usim_opc, self.usim_k = self._load_usim_keys()
         self.running = False
     
@@ -172,7 +173,8 @@ class LTEFlooder:
         run_flooding_attack(
             self.template_config, self.usrp_args, lambda: self.running,
             mcc=self.mcc, mnc=self.mnc, earfcn=self.earfcn,
-            usim_opc=self.usim_opc, usim_k=self.usim_k
+            usim_opc=self.usim_opc, usim_k=self.usim_k,
+            srsue_path=self.srsue_path
         )
     
     def stop(self):
@@ -226,6 +228,12 @@ def main():
         default="ue_template.conf",
         help="템플릿 UE config 파일 경로 (기본값: ue_template.conf)"
     )
+    parser.add_argument(
+        "--srsue-path",
+        type=str,
+        default="attack_ue/build/srsue/src/srsue",
+        help="srsue 바이너리 경로 (기본값: attack_ue/build/srsue/src/srsue)"
+    )
     
     args = parser.parse_args()
     
@@ -235,7 +243,8 @@ def main():
         mcc=args.mcc,
         mnc=args.mnc,
         earfcn=args.earfcn,
-        template_config=args.template_config
+        template_config=args.template_config,
+        srsue_path=args.srsue_path
     )
     
     # 시그널 핸들러 설정

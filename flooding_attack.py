@@ -49,7 +49,7 @@ def generate_imsi_imei(unique_id: int, mcc: Optional[int] = None, mnc: Optional[
     return imsi, imei
 
 
-def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[str] = None,
+def run_srsue_with_config(srsue_path: str, config_path: str, log_file: str, usrp_args: Optional[str] = None,
                           imsi: Optional[str] = None, imei: Optional[str] = None,
                           usim_opc: Optional[str] = None, usim_k: Optional[str] = None,
                           earfcn: Optional[int] = None) -> subprocess.Popen:
@@ -57,6 +57,7 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
     템플릿 config 파일로 srsue 실행 (명령줄 인자로 IMSI/IMEI 오버라이드)
     
     Args:
+        srsue_path: srsue 바이너리 경로
         config_path: 템플릿 config 파일 경로
         log_file: 로그 파일 경로
         usrp_args: USRP 장치 인자
@@ -66,6 +67,17 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
         usim_k: USIM K (명령줄 인자로 오버라이드)
         earfcn: EARFCN (명령줄 인자로 오버라이드)
     """
+    # srsue 경로 설정 (상대 경로면 절대 경로로 변환)
+    if not srsue_path:
+        raise ValueError("srsue_path는 필수입니다. --srsue-path 옵션을 지정하세요.")
+    
+    if not os.path.isabs(srsue_path):
+        srsue_path = os.path.abspath(srsue_path)
+    
+    # srsue 바이너리 존재 확인
+    if not os.path.exists(srsue_path):
+        raise FileNotFoundError(f"srsue 바이너리를 찾을 수 없습니다: {srsue_path}")
+    
     # config 파일 경로를 절대 경로로 변환
     if not os.path.isabs(config_path):
         config_path = os.path.abspath(config_path)
@@ -75,7 +87,7 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
         raise FileNotFoundError(f"Config 파일을 찾을 수 없습니다: {config_path}")
     
     cmd = [
-        "srsue",
+        srsue_path,
         config_path,
         "--log.filename", log_file,
         "--log.all_level", "info",
@@ -119,7 +131,7 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
 def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, running_flag=None,
                         mcc: Optional[int] = None, mnc: Optional[int] = None, 
                         earfcn: Optional[int] = None, usim_opc: Optional[str] = None,
-                        usim_k: Optional[str] = None):
+                        usim_k: Optional[str] = None, srsue_path: Optional[str] = None):
     """
     템플릿 config 파일을 사용하여 공격을 실행합니다.
     
@@ -165,7 +177,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 
                 try:
                     current_process = run_srsue_with_config(
-                        template_config, current_log_file, usrp_args,
+                        srsue_path, template_config, current_log_file, usrp_args,
                         imsi=imsi, imei=imei,
                         usim_opc=usim_opc, usim_k=usim_k,
                         earfcn=earfcn
