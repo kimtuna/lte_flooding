@@ -1,1 +1,11 @@
-여기까지가 진짜진짜 1차 마무리, rrc처음인 preamble인가 이거 보내고 request보지 않고 그냥 바로바로 보내는 방식
+epc 띄우기
+sudo ~/srsRAN_4G/build/srsepc/src/srsepc ~/.config/srsran/epc.conf
+
+enb 띄우기
+cd /home/parklab/.config/srsran/
+   sudo ~/srsRAN_4G/build/srsenb/src/srsenb enb.conf --rf.device_args "type=b200,serial=34C78C0"
+
+usrp 확인
+uhd_find_devices
+flooding 실행
+python3 lte_flooding.py --use-configs --usrp-args "serial=34C78E4"
