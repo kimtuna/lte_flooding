@@ -216,10 +216,21 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                 # 로그 파일이 생성되었는지 확인
                 if current_log_file and os.path.exists(current_log_file):
                     try:
-                        # 마지막 100줄만 읽기 (효율성 개선)
-                        with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                            lines = f.readlines()
-                            log_content = ''.join(lines[-100:]) if len(lines) > 100 else ''.join(lines)
+                        # 마지막 100줄만 읽기 (효율성 개선 - seek 사용)
+                        try:
+                            with open(current_log_file, 'rb') as f:
+                                # 파일 끝에서부터 읽기 시작
+                                try:
+                                    f.seek(-5000, 2)  # 끝에서 5KB 전부터 읽기
+                                except OSError:
+                                    f.seek(0)  # 파일이 작으면 처음부터
+                                lines = f.read().decode('utf-8', errors='ignore').split('\n')
+                                log_content = '\n'.join(lines[-100:])  # 마지막 100줄만
+                        except Exception:
+                            # fallback: 기존 방식
+                            with open(current_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                                lines = f.readlines()
+                                log_content = ''.join(lines[-100:]) if len(lines) > 100 else ''.join(lines)
                         
                         # RRC Connection Request 전송 확인 (Msg3 - 핵심!)
                         # 실제로 eNB로 전송되었는지 확인해야 함
@@ -265,14 +276,13 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             current_log_file = None
                             continue
                         # RAR 수신했는데 Msg3가 안 오는 경우 진단
-                        elif rar_received and elapsed > 2.0:
-                            # RAR는 받았는데 Msg3가 2초 이상 안 오면 문제
-                            logger.warning(f"config_{ue_id-1} RAR 수신했지만 Msg3 전송 안 됨 (경과: {elapsed:.1f}초)")
-                            # 더 기다려보기 (최대 5초)
-                            if elapsed < 5.0:
+                        elif rar_received and elapsed > 1.0:
+                            # RAR는 받았는데 Msg3가 1초 이상 안 오면 문제 (2초 → 1초로 단축)
+                            # 최대 2초까지 기다림 (5초 → 2초로 단축)
+                            if elapsed < 2.0:
                                 continue  # 계속 기다림
                             else:
-                                # 5초 넘으면 종료
+                                # 2초 넘으면 종료
                                 if current_process.poll() is None:
                                     current_process.kill()
                                 logger.info(f"config_{ue_id-1} 완료 (RAR 수신했지만 Msg3 타임아웃)")
@@ -306,7 +316,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                     elif elapsed > 1.0 and int(elapsed) % 2 == 0:  # 2초마다 한 번씩 로그
                         logger.info(f"로그 파일 대기 중: {current_log_file} (경과: {elapsed:.1f}초, 프로세스 실행 중)")
             
-            time.sleep(0.1)
+            time.sleep(0.05)  # 0.1초 → 0.05초로 단축 (더 빠른 반응)
             
     except KeyboardInterrupt:
         pass
