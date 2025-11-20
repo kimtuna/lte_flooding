@@ -1,6 +1,6 @@
 import re, statistics, datetime
 
-logfile = "~/.config/srsran/enb_ctx.log"
+logfile = "/home/parklab/.config/srsran/enb_ctx.log"
 
 re_conn = re.compile(r"\[(\d+\.\d+)\].*User (0x[0-9a-fA-F]+) connected")
 re_disc = re.compile(r"\[(\d+\.\d+)\].*Disconnecting rnti=(0x[0-9a-fA-F]+)")
