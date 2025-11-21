@@ -153,10 +153,13 @@ void attack_ue::tx_prach_thread()
     current_rapid.store(next_rapid);
 
     // PRACH 송신
+    // allowed_subframe = -1: 모든 subframe에서 전송 가능
+    // sel_mask_index는 실제로는 사용되지 않지만 proc_ra.cc와 동일한 패턴 유지
     float target_power_dbm = -100.0f; // 기본 전력 (실제로는 RACH config에서 가져와야 함)
-    phy_h->prach_send(rapid, sel_mask_index, target_power_dbm);
+    int allowed_subframe = -1; // 모든 subframe에서 전송 가능하도록 설정
+    phy_h->prach_send(rapid, allowed_subframe, target_power_dbm);
 
-    logger.info("TX: Sent PRACH preamble %d (mask=%d, power=%.1f dBm)", rapid, sel_mask_index, target_power_dbm);
+    logger.info("TX: Sent PRACH preamble %d (allowed_subframe=%d, power=%.1f dBm)", rapid, allowed_subframe, target_power_dbm);
 
     // 활성 RAPID 목록에 추가
     {
