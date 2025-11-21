@@ -391,10 +391,14 @@ float phy::get_pathloss_db()
 
 void phy::prach_send(uint32_t preamble_idx, int allowed_subframe, float target_power_dbm, float ta_base_sec)
 {
+  Info("PHY: prach_send called (preamble_idx=%d, allowed_subframe=%d, power=%.1f dBm)", 
+       preamble_idx, allowed_subframe, target_power_dbm);
   common.ta.set_base_sec(ta_base_sec);
   common.reset_radio();
   if (!prach_buffer.prepare_to_send(preamble_idx, allowed_subframe, target_power_dbm)) {
     Error("Preparing PRACH to send");
+  } else {
+    Info("PHY: PRACH prepare_to_send succeeded");
   }
 }
 

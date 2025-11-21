@@ -92,6 +92,8 @@ def run_srsue_with_config(srsue_path: str, config_path: str, log_file: str, usrp
         "--log.filename", log_file,
         "--log.all_level", "info",
         "--log.rrc_level", "debug",  # RRC 레벨을 debug로 설정하여 Msg3 로그 확인
+        "--log.phy_level", "info",  # PHY 레벨을 info로 설정하여 PRACH 로그 확인
+        "--log.mac_level", "info",  # MAC 레벨을 info로 설정하여 RACH 로그 확인
         "--mac.attack_mode", "true",  # attack_ue TX/RX 스레드 활성화
         "--mac.attack_prach_period_ms", "20"  # PRACH 송신 주기 (20ms)
     ]
