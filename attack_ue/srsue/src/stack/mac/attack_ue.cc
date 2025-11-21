@@ -143,6 +143,13 @@ void attack_ue::tx_prach_thread()
   std::uniform_int_distribution<uint32_t> dis(0, ctx.nof_preambles - 1);
 
   while (running.load() && attack_mode_enabled.load()) {
+    // phy_h가 null인지 확인
+    if (!phy_h) {
+      logger.error("PHY interface is null, cannot send PRACH");
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      continue;
+    }
+
     // RAPID 선택 (순환 또는 랜덤)
     uint32_t rapid = current_rapid.load();
     // 순환 방식: current_rapid = (current_rapid + 1) % ctx.nof_preambles;
@@ -156,6 +163,10 @@ void attack_ue::tx_prach_thread()
     // allowed_subframe = -1: 모든 subframe에서 전송 가능
     float target_power_dbm = -100.0f; // 기본 전력 (실제로는 RACH config에서 가져와야 함)
     int allowed_subframe = -1; // 모든 subframe에서 전송 가능하도록 설정
+    
+    logger.info("TX: Calling phy_h->prach_send(rapid=%d, allowed_subframe=%d, power=%.1f)", 
+                rapid, allowed_subframe, target_power_dbm);
+    
     phy_h->prach_send(rapid, allowed_subframe, target_power_dbm);
 
     logger.info("TX: Prepared PRACH preamble %d (allowed_subframe=%d, power=%.1f dBm)", rapid, allowed_subframe, target_power_dbm);
