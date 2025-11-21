@@ -154,12 +154,11 @@ void attack_ue::tx_prach_thread()
 
     // PRACH 송신
     // allowed_subframe = -1: 모든 subframe에서 전송 가능
-    // sel_mask_index는 실제로는 사용되지 않지만 proc_ra.cc와 동일한 패턴 유지
     float target_power_dbm = -100.0f; // 기본 전력 (실제로는 RACH config에서 가져와야 함)
     int allowed_subframe = -1; // 모든 subframe에서 전송 가능하도록 설정
     phy_h->prach_send(rapid, allowed_subframe, target_power_dbm);
 
-    logger.info("TX: Sent PRACH preamble %d (allowed_subframe=%d, power=%.1f dBm)", rapid, allowed_subframe, target_power_dbm);
+    logger.info("TX: Prepared PRACH preamble %d (allowed_subframe=%d, power=%.1f dBm)", rapid, allowed_subframe, target_power_dbm);
 
     // 활성 RAPID 목록에 추가
     {
@@ -167,8 +166,15 @@ void attack_ue::tx_prach_thread()
       ctx.active_rapids.insert(rapid);
     }
 
-    // 주기 대기
-    std::this_thread::sleep_for(std::chrono::milliseconds(ctx.prach_period_ms));
+    // PRACH가 실제로 전송될 수 있도록 대기
+    // 문제: PRACH opportunity는 특정 TTI에서만 발생하므로,
+    // PRACH가 전송되기 전에 다음 PRACH가 준비되면 덮어씌워질 수 있음
+    // 해결: PRACH opportunity 주기(보통 10ms)보다 짧은 주기로 준비하되,
+    // PRACH가 실제로 전송되었는지 확인하는 메커니즘 필요
+    // 
+    // 임시 해결책: PRACH를 더 자주 준비 (5ms 주기)
+    // 이렇게 하면 PRACH opportunity가 있을 때마다 새로운 PRACH가 준비됨
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 
   logger.info("TX PRACH thread stopped");
