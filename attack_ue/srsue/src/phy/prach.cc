@@ -148,7 +148,8 @@ bool prach::prepare_to_send(uint32_t preamble_idx_, int allowed_subframe_, float
   target_power_dbm = target_power_dbm_;
   allowed_subframe = allowed_subframe_;
   transmitted_tti  = -1;
-  Debug("PRACH: prepare to send preamble %d", preamble_idx);
+  Info("PRACH: prepare to send preamble %d (allowed_subframe=%d, power=%.1f dBm, cell_initiated=%d)", 
+       preamble_idx, allowed_subframe, target_power_dbm, cell_initiated);
   return true;
 }
 
@@ -169,9 +170,18 @@ bool prach::is_ready_to_send(uint32_t current_tti_, uint32_t current_pci)
     // consider the number of subframes the transmission must be anticipated
     uint32_t tti_tx = TTI_TX(current_tti_);
     if (srsran_prach_tti_opportunity(&prach_obj, tti_tx, allowed_subframe)) {
-      Debug("PRACH Buffer: Ready to send at tti: %d (now is %d)", tti_tx, current_tti_);
+      Info("PRACH Buffer: Ready to send at tti: %d (now is %d, preamble=%d)", tti_tx, current_tti_, preamble_idx);
       transmitted_tti = tti_tx;
       return true;
+    } else {
+      Debug("PRACH Buffer: Not ready (tti_tx=%d, current_tti=%d, preamble=%d, opportunity=false)", 
+            tti_tx, current_tti_, preamble_idx);
+    }
+  } else {
+    if (!is_pending()) {
+      Debug("PRACH Buffer: Not pending (preamble_idx=%d, cell_initiated=%d)", preamble_idx, cell_initiated);
+    } else if (current_pci != cell.id) {
+      Debug("PRACH Buffer: PCI mismatch (current=%d, cell=%d)", current_pci, cell.id);
     }
   }
   return false;

@@ -526,6 +526,8 @@ void sync::run_camping_in_sync_state(lte::sf_worker*      lte_worker,
     prach_ptr = prach_buffer->generate(get_tx_cfo(), &prach_nof_sf, &prach_power);
     if (prach_ptr == nullptr) {
       Error("Generating PRACH");
+    } else {
+      Info("PRACH: Generated for transmission (tti=%d, nof_sf=%d, power=%.1f dBm)", tti, prach_nof_sf, prach_power);
     }
   }
 
