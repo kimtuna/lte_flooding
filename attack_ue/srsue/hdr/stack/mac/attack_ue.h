@@ -57,6 +57,9 @@ public:
   void set_prach_period_ms(uint32_t period_ms);
   void set_nof_preambles(uint32_t nof_preambles);
 
+  // TTI 기반 처리 (MAC의 run_tti()에서 호출)
+  void step_tti(uint32_t tti);
+
   // RAR 수신 시 호출 (PHY worker 스레드에서)
   void on_rar_received(uint32_t rapid, uint16_t temp_crnti, uint8_t grant[SRSRAN_RAR_GRANT_LEN]);
 
@@ -64,7 +67,7 @@ public:
   bool is_attack_mode_enabled() const { return attack_mode_enabled.load(); }
 
 private:
-  // TX 스레드: PRACH 주기적 송신
+  // TX 스레드: PRACH 주기적 송신 (레거시, 큐 방식으로 대체 예정)
   void tx_prach_thread();
 
   // RX 스레드: RAR 감지 (실제로는 PHY worker 콜백 사용)

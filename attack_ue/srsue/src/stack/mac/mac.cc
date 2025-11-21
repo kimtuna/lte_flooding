@@ -221,6 +221,11 @@ void mac::run_tti(const uint32_t tti)
   ra_procedure.step(tti);
   ra_procedure.update_rar_window(ra_window);
 
+  // Attack UE 큐 기반 처리 (TTI 동기화)
+  if (attack_mode_enabled.load()) {
+    attack_ue_instance.step_tti(tti);
+  }
+
   // Count TTI for metrics
   std::lock_guard<std::mutex> lock(metrics_mutex);
   for (uint32_t i = 0; i < SRSRAN_MAX_CARRIERS; i++) {
