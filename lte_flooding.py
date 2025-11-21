@@ -231,34 +231,39 @@ def main():
     parser.add_argument(
         "--srsue-path",
         type=str,
-        default=None,
-        help="srsue 바이너리 경로 (기본값: 자동 탐지)"
+        default="attack_ue/build/srsue/src/srsue",
+        help="srsue 바이너리 경로 (기본값: attack_ue/build/srsue/src/srsue)"
     )
     
     args = parser.parse_args()
     
-    # srsue 바이너리 경로 자동 탐지
-    if not args.srsue_path:
-        # 스크립트가 있는 디렉토리를 기준으로 탐색
-        script_dir = os.path.dirname(os.path.abspath(__file__))
+    # srsue 바이너리 경로 확인 및 자동 탐지
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 기본 경로를 절대 경로로 변환
+    if args.srsue_path and not os.path.isabs(args.srsue_path):
+        args.srsue_path = os.path.join(script_dir, args.srsue_path) if not os.path.isabs(args.srsue_path) else args.srsue_path
+    
+    # 기본 경로에 파일이 없으면 다른 경로 탐색
+    if not args.srsue_path or not os.path.exists(args.srsue_path) or not os.path.isfile(args.srsue_path):
         possible_paths = [
             os.path.join(script_dir, "attack_ue/build/srsue/src/srsue"),
             os.path.join(script_dir, "attack_ue/build/srsue/srsue"),
             os.path.join(script_dir, "attack_ue/srsue/build/src/srsue"),
             # 현재 작업 디렉토리 기준도 시도
-            "attack_ue/build/srsue/src/srsue",
-            "attack_ue/build/srsue/srsue",
-            "attack_ue/srsue/build/src/srsue",
+            os.path.join(os.getcwd(), "attack_ue/build/srsue/src/srsue"),
+            os.path.join(os.getcwd(), "attack_ue/build/srsue/srsue"),
         ]
+        
         for path in possible_paths:
-            abs_path = os.path.abspath(path) if not os.path.isabs(path) else path
+            abs_path = os.path.abspath(path)
             if os.path.exists(abs_path) and os.path.isfile(abs_path):
                 args.srsue_path = abs_path
                 logger.info(f"자동 탐지: srsue 바이너리 경로 = {abs_path}")
                 break
         
         # 여전히 찾지 못한 경우 find 명령어로 검색 시도
-        if not args.srsue_path:
+        if not args.srsue_path or not os.path.exists(args.srsue_path):
             try:
                 result = subprocess.run(
                     ["find", script_dir, "-name", "srsue", "-type", "f", "-executable"],
@@ -277,9 +282,10 @@ def main():
             except Exception as e:
                 logger.debug(f"find 명령어로 탐색 실패: {e}")
         
-        if not args.srsue_path:
+        if not args.srsue_path or not os.path.exists(args.srsue_path):
             logger.error("srsue 바이너리를 자동으로 찾을 수 없습니다. --srsue-path 옵션을 지정하세요.")
             logger.error("예: --srsue-path attack_ue/build/srsue/src/srsue")
+            logger.error(f"확인한 경로들: {possible_paths[:3]}")
             sys.exit(1)
     
     # 템플릿 config 방식 (ue_template.conf 사용)
