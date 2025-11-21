@@ -242,7 +242,7 @@ def main():
     
     # 기본 경로를 절대 경로로 변환
     if args.srsue_path and not os.path.isabs(args.srsue_path):
-        args.srsue_path = os.path.join(script_dir, args.srsue_path) if not os.path.isabs(args.srsue_path) else args.srsue_path
+        args.srsue_path = os.path.join(script_dir, args.srsue_path)
     
     # 기본 경로에 파일이 없으면 다른 경로 탐색
     if not args.srsue_path or not os.path.exists(args.srsue_path) or not os.path.isfile(args.srsue_path):
