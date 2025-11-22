@@ -294,7 +294,7 @@ def run_flooding_attack(template_config: str, usrp_args: Optional[str] = None, r
                             # RRC Request (Msg3) 전송 확인 → eNB가 UE context 생성
                             # 프로세스는 계속 실행 (kill하지 않음)
                             msg3_count += 1
-                            logger.info(f"Msg3 전송됨 (총 {msg3_count}회) - 프로세스 계속 실행 중")
+                            logger.info(f"공격중")
                             time.sleep(0.1)  # 로그 파일 업데이트 대기
                             continue
                         # RAR 수신했을 때: Msg3 대기 (프로세스 계속 실행)
