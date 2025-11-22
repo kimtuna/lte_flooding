@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 
 from enb_scout import find_enb
-from flooding_attack import run_flooding_attack
+from flooding import run_flooding_attack
 
 # 로깅 설정
 logging.basicConfig(
@@ -319,3 +319,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

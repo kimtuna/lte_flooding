@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 
 from enb_scout import find_enb
-from flooding_attack_normal_ue import run_flooding_attack
+from flooding_normal import run_flooding_attack
 
 # 로깅 설정
 logging.basicConfig(
