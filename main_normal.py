@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-LTE Flooding Script - Normal srsUE Demo
-일반 srsUE를 사용한 Flooding 공격 시연용 스크립트
-"""
 
 import subprocess
 import time
@@ -170,30 +166,22 @@ def main():
     parser.add_argument(
         "--srsue-path",
         type=str,
-        default="srsue",
-        help="일반 srsue 바이너리 경로 (기본값: srsue, PATH에서 찾음)"
+        default="~/srsRAN_4G/build/srsue/src/srsue",
+        help="일반 srsue 바이너리 경로 (기본값: ~/srsRAN_4G/build/srsue/src/srsue)"
     )
     
     args = parser.parse_args()
     
-    # srsue 경로 확인
+    # srsue 경로 확인 및 ~ 확장
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    if args.srsue_path and not os.path.isabs(args.srsue_path):
-        # 상대 경로면 현재 디렉토리나 PATH에서 찾기
-        if not os.path.exists(args.srsue_path):
-            # PATH에서 찾기
-            import shutil
-            srsue_in_path = shutil.which("srsue")
-            if srsue_in_path:
-                args.srsue_path = srsue_in_path
-                logger.info(f"srsue 바이너리 찾음: {args.srsue_path}")
-            else:
-                logger.error("srsue 바이너리를 찾을 수 없습니다. --srsue-path 옵션을 지정하세요.")
-                sys.exit(1)
+    # ~ 확장 (홈 디렉토리)
+    if args.srsue_path:
+        args.srsue_path = os.path.expanduser(args.srsue_path)
     
     if not os.path.exists(args.srsue_path):
         logger.error(f"srsue 바이너리를 찾을 수 없습니다: {args.srsue_path}")
+        logger.error("--srsue-path 옵션으로 올바른 경로를 지정하세요.")
         sys.exit(1)
     
     logger.info("=" * 60)

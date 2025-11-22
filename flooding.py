@@ -44,7 +44,7 @@ def generate_imsi_imei(unique_id: int, mcc: Optional[int] = None, mnc: Optional[
     
     # IMEI 포맷팅 (15자리)
     imei_suffix = f"{unique_id:06d}"
-    imei = f"35349006{imei_suffix}0"  # 총 15자리
+    imei = f"35349006{imei_suffix}0"
     
     return imsi, imei
 
@@ -67,22 +67,18 @@ def run_srsue_with_config(srsue_path: str, config_path: str, log_file: str, usrp
         usim_k: USIM K (명령줄 인자로 오버라이드)
         earfcn: EARFCN (명령줄 인자로 오버라이드)
     """
-    # srsue 경로 설정 (상대 경로면 절대 경로로 변환)
     if not srsue_path:
         raise ValueError("srsue_path는 필수입니다. --srsue-path 옵션을 지정하세요.")
     
     if not os.path.isabs(srsue_path):
         srsue_path = os.path.abspath(srsue_path)
     
-    # srsue 바이너리 존재 확인
     if not os.path.exists(srsue_path):
         raise FileNotFoundError(f"srsue 바이너리를 찾을 수 없습니다: {srsue_path}")
     
-    # config 파일 경로를 절대 경로로 변환
     if not os.path.isabs(config_path):
         config_path = os.path.abspath(config_path)
     
-    # config 파일 존재 확인
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config 파일을 찾을 수 없습니다: {config_path}")
     
