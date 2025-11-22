@@ -88,9 +88,8 @@ class LTEFlooderNormal:
         # eNB 탐색
         logger.info(f"eNB 탐색 중... (사용하는 config: {self.template_config})")
         enb_found = find_enb(
-            usrp_args=self.usrp_args,
-            config_path=self.template_config,
-            earfcn=self.earfcn
+            config_file=self.template_config,
+            usrp_args=self.usrp_args
         )
         
         if not enb_found:
